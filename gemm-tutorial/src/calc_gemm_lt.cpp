@@ -85,7 +85,7 @@ free_gemm_int(gemm_lt_a *matrixA,
 }
 
 static inline double
-calc_gemm_int(int repeats, int N, int dalpha, int dbeta,
+calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
               gemm_lt_a *matrixA, gemm_lt_b *matrixB, gemm_lt_c *matrixC, gemm_lt_d *matrixD)
 {
   mprintf("Performing multiplication...\n");
