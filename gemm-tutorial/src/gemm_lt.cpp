@@ -170,7 +170,9 @@ int main(int argc, char *argv[])
   }
   case ('I'):
   {
-    int8_t *matrixA, *matrixB, *matrixC; 
+    int8_t *matrixA; 
+    int8_t *matrixB; 
+    int32_t *matrixC; 
     int32_t *matrixD;
     alloc_gemm_int(N, &matrixA, &matrixB, &matrixC, &matrixD);
     time_taken = calc_gemm_int(repeats, N, alpha, beta, matrixA, matrixB, matrixC, matrixD);
@@ -195,9 +197,7 @@ int main(int argc, char *argv[])
     mprintf("Multiply time:        %f seconds\n", time_taken);
 
     const double ops_computed =
-          ((N_dbl * N_dbl * N_dbl * 2.0 * (double)(repeats)) +
-           (N_dbl * N_dbl * 3 * (double)(repeats))) *
-          (double)(mpi_size);
+          ((N_dbl * N_dbl * N_dbl * 2.0) + (N_dbl * N_dbl * 3.0)) * (double)(repeats) * (double)(mpi_size);
 
     if (prec == 'I')
     {

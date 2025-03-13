@@ -3,19 +3,27 @@
 //////////////////////////////////
 #if (PRECISION == 'I')
 
+#define gemm_lt_a int8_t
+#define gemm_lt_b int8_t
+#define gemm_lt_c int32_t
+#define gemm_lt_d int32_t
+#define gemm_lt_alpha int32_t
+#define gemm_lt_beta int32_t
+#define gemm_lt_mat int32_t
+
 static inline void
 alloc_gemm_int(int N,
-               int8_t **pmatrixA,
-               int8_t **pmatrixB,
-               int8_t **pmatrixC,
-               int32_t **pmatrixD)
+               gemm_lt_a **pmatrixA,
+               gemm_lt_b **pmatrixB,
+               gemm_lt_c **pmatrixC,
+               gemm_lt_d **pmatrixD)
 {
 
   mprintf("Allocating Matrices...\n");
-  int8_t *__restrict__ matrixA = (int8_t *)malloc(sizeof(int8_t) * N * N);
-  int8_t *__restrict__ matrixB = (int8_t *)malloc(sizeof(int8_t) * N * N);
-  int8_t *__restrict__ matrixC = (int8_t *)malloc(sizeof(int8_t) * N * N);
-  int32_t *__restrict__ matrixD = (int32_t *)malloc(sizeof(int32_t) * N * N);
+  gemm_lt_a *__restrict__ matrixA = (gemm_lt_a *)malloc(sizeof(gemm_lt_a) * N * N);
+  gemm_lt_b *__restrict__ matrixB = (gemm_lt_b *)malloc(sizeof(gemm_lt_b) * N * N);
+  gemm_lt_c *__restrict__ matrixC = (gemm_lt_c *)malloc(sizeof(gemm_lt_c) * N * N);
+  gemm_lt_d *__restrict__ matrixD = (gemm_lt_d *)malloc(sizeof(gemm_lt_d) * N * N);
 
   mprintf("Allocation complete, populating with values...\n");
 #pragma omp parallel for
@@ -40,10 +48,10 @@ alloc_gemm_int(int N,
 
 static inline long long int
 check_gemm_int(int N,
-               int8_t *matrixA,
-               int8_t *matrixB,
-               int8_t *matrixC,
-               int32_t *matrixD)
+               gemm_lt_a *matrixA,
+               gemm_lt_b *matrixB,
+               gemm_lt_c *matrixC,
+               gemm_lt_d *matrixD)
 {
   mprintf("Calculating matrix check...\n");
 
@@ -64,10 +72,10 @@ check_gemm_int(int N,
 }
 
 static inline void
-free_gemm_int(int8_t *matrixA,
-              int8_t *matrixB,
-              int8_t *matrixC,
-              int32_t *matrixD)
+free_gemm_int(gemm_lt_a *matrixA,
+              gemm_lt_b *matrixB,
+              gemm_lt_c *matrixC,
+              gemm_lt_d *matrixD)
 {
   free(matrixA);
   free(matrixB);
@@ -77,21 +85,23 @@ free_gemm_int(int8_t *matrixA,
 }
 
 static inline double
-calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
-              int8_t *matrixA, int8_t *matrixB, int8_t *matrixC, int32_t *matrixD)
+calc_gemm_int(int repeats, int N, int dalpha, int dbeta,
+              gemm_lt_a *matrixA, gemm_lt_b *matrixB, gemm_lt_c *matrixC, gemm_lt_d *matrixD)
 {
   mprintf("Performing multiplication...\n");
 
-  int32_t alpha = dalpha;
-  int32_t beta = dbeta;
+  gemm_lt_alpha alpha = dalpha;
+  gemm_lt_beta beta = dbeta;
 
   cudaError_t errorA, errorB, errorC, errorD;
-  int8_t *d_matrixA, *d_matrixB, *d_matrixC;
-  int32_t *d_matrixD;
-  errorA = cudaMalloc((void **)&d_matrixA, N * N * sizeof(int8_t));
-  errorB = cudaMalloc((void **)&d_matrixB, N * N * sizeof(int8_t));
-  errorC = cudaMalloc((void **)&d_matrixC, N * N * sizeof(int8_t));
-  errorD = cudaMalloc((void **)&d_matrixD, N * N * sizeof(int32_t));
+  gemm_lt_a *d_matrixA;
+  gemm_lt_b *d_matrixB;
+  gemm_lt_c *d_matrixC;
+  gemm_lt_d *d_matrixD;
+  errorA = cudaMalloc((void **)&d_matrixA, N * N * sizeof(gemm_lt_a));
+  errorB = cudaMalloc((void **)&d_matrixB, N * N * sizeof(gemm_lt_b));
+  errorC = cudaMalloc((void **)&d_matrixC, N * N * sizeof(gemm_lt_c));
+  errorD = cudaMalloc((void **)&d_matrixD, N * N * sizeof(gemm_lt_d));
   if ((errorA != cudaSuccess) || (errorB != cudaSuccess) || (errorC != cudaSuccess) || (errorD != cudaSuccess))
   {
     printf("ERROR: allocating device matrices\n");
@@ -109,26 +119,40 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   }
 
   // Define CUDA data types and compute types based on precision
-  cudaDataType_t dataTypeAB = CUDA_R_8I;
-  cudaDataType_t dataTypeCD = CUDA_R_32I;
+  cudaDataType_t dataType_8I = CUDA_R_8I;
+  cudaDataType_t dataType_32I = CUDA_R_32I;
   cudaDataType_t ScaleType = CUDA_R_32I;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
 
   // Create matrix layouts
   cublasLtMatrixLayout_t Adesc, Bdesc, Cdesc, Ddesc;
-  cublasLtMatrixLayoutCreate(&Adesc, dataTypeAB, N, N, N);
-  cublasLtMatrixLayoutCreate(&Bdesc, dataTypeAB, N, N, N);
-  cublasLtMatrixLayoutCreate(&Cdesc, dataTypeCD, N, N, N);
-  cublasLtMatrixLayoutCreate(&Ddesc, dataTypeCD, N, N, N);
+  cublasLtMatrixLayoutCreate(&Adesc, dataType_8I, N, N, N);
+  cublasLtMatrixLayoutCreate(&Bdesc, dataType_8I, N, N, N);
+  cublasLtMatrixLayoutCreate(&Cdesc, dataType_32I, N, N, N);
+  cublasLtMatrixLayoutCreate(&Ddesc, dataType_32I, N, N, N);
+  
+  /*
+  // Set matrix order attributes
+  cublasLtOrder_t orderA = CUBLASLT_ORDER_COL32;
+  cublasLtOrder_t orderB = CUBLASLT_ORDER_COL32_2R_4R4;
+  cublasLtOrder_t orderC = CUBLASLT_ORDER_COL32;
+  cublasLtOrder_t orderD = CUBLASLT_ORDER_COL32;
 
+  cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA));
+  cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB));
+  cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderC, sizeof(orderC));
+  cublasLtMatrixLayoutSetAttribute(Ddesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &orderD, sizeof(orderD));
+  */
+ 
+  // Create matmul descriptor
   cublasLtMatmulDesc_t matmulDesc;
   cublasLtMatmulDescCreate(&matmulDesc, computeType, ScaleType);
 
   cublasStatus_t statusA, statusB, statusC, statusD;
-  statusA = cublasSetMatrix(N, N, sizeof(int8_t), matrixA, N, d_matrixA, N);
-  statusB = cublasSetMatrix(N, N, sizeof(int8_t), matrixB, N, d_matrixB, N);
-  statusC = cublasSetMatrix(N, N, sizeof(int8_t), matrixC, N, d_matrixC, N);
-  statusD = cublasSetMatrix(N, N, sizeof(int32_t), matrixD, N, d_matrixD, N);
+  statusA = cublasSetMatrix(N, N, sizeof(gemm_lt_a), matrixA, N, d_matrixA, N);
+  statusB = cublasSetMatrix(N, N, sizeof(gemm_lt_b), matrixB, N, d_matrixB, N);
+  statusC = cublasSetMatrix(N, N, sizeof(gemm_lt_c), matrixC, N, d_matrixC, N);
+  statusD = cublasSetMatrix(N, N, sizeof(gemm_lt_d), matrixD, N, d_matrixD, N);
   if ((statusA != CUBLAS_STATUS_SUCCESS) || (statusB != CUBLAS_STATUS_SUCCESS) || (statusC != CUBLAS_STATUS_SUCCESS) || (statusD != CUBLAS_STATUS_SUCCESS))
   {
     printf("ERROR: intializing device matrices\n");
@@ -166,7 +190,7 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   cudaDeviceSynchronize();
   const double end = get_seconds();
 
-  cublasGetMatrix(N, N, sizeof(int32_t), d_matrixD, N, matrixD, N);
+  cublasGetMatrix(N, N, sizeof(gemm_lt_mat), d_matrixD, N, matrixD, N);
   cudaFree(d_matrixA);
   cudaFree(d_matrixB);
   cudaFree(d_matrixC);
@@ -381,4 +405,3 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
 #undef gemm_t
 
 #endif
-
