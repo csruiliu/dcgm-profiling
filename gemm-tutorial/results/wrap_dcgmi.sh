@@ -32,7 +32,7 @@ dcgm_metrics=""
 #dcgm_metrics+="210,"  #mem_util_samples
 #dcgm_metrics+="211,"  #gpu_util_samples
 
-#dcgm_metrics+="100,1" #gr_engine_active
+#dcgm_metrics+="1001," #gr_engine_active
 dcgm_metrics+="1002," #sm_active
 #dcgm_metrics+="1003," #sm_occupancy
 dcgm_metrics+="1004," #tensor_active
