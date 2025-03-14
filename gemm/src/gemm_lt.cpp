@@ -174,10 +174,9 @@ int main(int argc, char *argv[])
     int8_t *matrixB; 
     int32_t *matrixC; 
     alloc_gemm_int(N, &matrixA, &matrixB, &matrixC);
-    time_taken = calc_gemm_int(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
-    // time_taken = calc_gemm_int(repeats, N, alpha, beta, matrixA, matrixB, matrixC, matrixD);
-    // status = check_gemm_int(N, matrixA, matrixB, matrixC, matrixD);
-    free_gemm_int(matrixA, matrixB, matrixC);
+    // time_taken = calc_gemm_int(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
+    // status = check_gemm_int(N, matrixA, matrixB, matrixC);
+    // free_gemm_int(matrixA, matrixB, matrixC);
     sizeof_gemm_t = sizeof(int32_t);
     break;
   }

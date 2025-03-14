@@ -21,15 +21,15 @@ alloc_gemm_int(int N,
                gemm_lt_c **pmatrixC)
 {
   // Calculate proper leading dimensions
-  int lda = 32 * N;
-  int ldb = 32 * roundoff(N, 8);
-  int ldc = 32 * N;
+  // int lda = 32 * N;
+  // int ldb = 32 * roundoff(N, 32);
+  // int ldc = 32 * N;
 
   mprintf("Allocating Matrices...\n");
   // Allocate with proper padded dimensions
-  gemm_lt_a *matrixA = (gemm_lt_a *)malloc(sizeof(gemm_lt_a) * roundoff(N, 32) / 32 * lda);
-  gemm_lt_b *matrixB = (gemm_lt_b *)malloc(sizeof(gemm_lt_b) * roundoff(N, 32) / 32 * ldb);
-  gemm_lt_c *matrixC = (gemm_lt_c *)malloc(sizeof(gemm_lt_c) * roundoff(N, 32) / 32 * ldc);
+  gemm_lt_a *__restrict__ matrixA = (gemm_lt_a *)malloc(sizeof(gemm_lt_a) * N * N);
+  gemm_lt_b *__restrict__ matrixB = (gemm_lt_b *)malloc(sizeof(gemm_lt_b) * N * N);
+  gemm_lt_c *__restrict__ matrixC = (gemm_lt_c *)malloc(sizeof(gemm_lt_c) * N * N);
 
   mprintf("Allocation complete, populating with values...\n");
 #pragma omp parallel for
@@ -37,9 +37,9 @@ alloc_gemm_int(int N,
   {
     for (int j = 0; j < N; j++)
     {
-      matrixA[i * lda + j] = rand();               
-      matrixB[i * ldb + j] = rand();
-      matrixC[i * ldc + j] = rand();
+      matrixA[i * N + j] = rand();               
+      matrixB[i * N + j] = rand();
+      matrixC[i * N + j] = rand();
     }
   }
 
@@ -105,12 +105,14 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   gemm_lt_a *Atransform = NULL;
   gemm_lt_b *Btransform = NULL;
   gemm_lt_c *Ctransform = NULL;
+  
   cublasLtMatrixLayout_t AtransformDesc = NULL, BtransformDesc = NULL, CtransformDesc = NULL;
-  cublasLtOrder_t order_COL32       = CUBLASLT_ORDER_COL32;
-  cublasLtOrder_t order_COL4_4R2_8C = CUBLASLT_ORDER_COL4_4R2_8C;
+  
+  cublasLtOrder_t order_COL32 = CUBLASLT_ORDER_COL32;
+  cublasLtOrder_t order_B = CUBLASLT_ORDER_COL32_2R_4R4;
   
   int ldatransform = 32 * N;
-  int ldbtransform = 32 * roundoff(N, 8);
+  int ldbtransform = 32 * roundoff(N, 32);
   int ldctransform = 32 * N;
 
   // Create cuBLASLt handle
@@ -129,20 +131,30 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   gemm_lt_c *d_matrixC;
 
   cudaError_t errorA, errorB, errorC;
-  errorA = cudaMalloc(reinterpret_cast<void**>(&d_matrixA), sizeof(gemm_lt_a) * roundoff(N, 32) / 32 * ldatransform);
-  errorB = cudaMalloc(reinterpret_cast<void**>(&d_matrixB), sizeof(gemm_lt_b) * roundoff(N, 32) / 32 * ldbtransform);
-  errorC = cudaMalloc(reinterpret_cast<void**>(&d_matrixC), sizeof(gemm_lt_c) * roundoff(N, 32) / 32 * ldctransform);
+  errorA = cudaMalloc(reinterpret_cast<void**>(&d_matrixA), sizeof(gemm_lt_a) * N * N);
+  errorB = cudaMalloc(reinterpret_cast<void**>(&d_matrixB), sizeof(gemm_lt_b) * N * N);
+  errorC = cudaMalloc(reinterpret_cast<void**>(&d_matrixC), sizeof(gemm_lt_c) * N * N);
   if ((errorA != cudaSuccess) || (errorB != cudaSuccess) || (errorC != cudaSuccess))
   {
     printf("ERROR: allocating device matrices\n");
     exit(1);
   }
   
+  cublasStatus_t statusA, statusB, statusC;
+  statusA = cublasSetMatrix(N, N, sizeof(gemm_lt_a), matrixA, N, d_matrixA, N);
+  statusB = cublasSetMatrix(N, N, sizeof(gemm_lt_b), matrixB, N, d_matrixB, N);
+  statusC = cublasSetMatrix(N, N, sizeof(gemm_lt_c), matrixC, N, d_matrixC, N);
+  if ((statusA != CUBLAS_STATUS_SUCCESS) || (statusB != CUBLAS_STATUS_SUCCESS) || (statusC != CUBLAS_STATUS_SUCCESS))
+  {
+    printf("ERROR: intializing device matrices\n");
+    exit(1);
+  }
+
   mprintf("cudaMalloc...\n");
 
-  cudaMalloc(reinterpret_cast<void**>(&Atransform), sizeof(gemm_lt_a) * roundoff(N, 32) / 32 * ldatransform);
-  cudaMalloc(reinterpret_cast<void**>(&Btransform), sizeof(gemm_lt_b) * roundoff(N, 32) / 32 * ldbtransform);
-  cudaMalloc(reinterpret_cast<void**>(&Ctransform), sizeof(gemm_lt_c) * roundoff(N, 32) / 32 * ldctransform);
+  cudaMalloc(reinterpret_cast<void**>(&Atransform), sizeof(gemm_lt_a) * ldatransform * N);
+  cudaMalloc(reinterpret_cast<void**>(&Btransform), sizeof(gemm_lt_b) * ldbtransform * N);
+  cudaMalloc(reinterpret_cast<void**>(&Ctransform), sizeof(gemm_lt_c) * ldctransform * N);
   
   cublasLtMatrixTransformDescCreate(&transformDesc, CUDA_R_32I);
 
@@ -153,9 +165,9 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   mprintf("MatrixLayout Creation 1...\n");
 
   // create descriptors for original matrices
-  cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, N, N, ldatransform);
-  cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, N, N, ldbtransform);
-  cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32I, N, N, ldctransform);
+  cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, N, N, N);
+  cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, N, N, N);
+  cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32I, N, N, N);
 
   cublasLtMatrixLayoutCreate(&AtransformDesc, CUDA_R_8I, N, N, ldatransform);
   cublasLtMatrixLayoutSetAttribute(AtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL32, sizeof(order_COL32));
@@ -165,7 +177,7 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   // data memory order is set to CUBLASLT_ORDER_COL4_4R2_8C in order to achieve best performance on Turing devices.
   // for best performance on Ampere, consider setting the memory order to CUBLASLT_ORDER_COL32_2R_4R4.
   cublasLtMatrixLayoutCreate(&BtransformDesc, CUDA_R_8I, N, N, ldbtransform);
-  cublasLtMatrixLayoutSetAttribute(BtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL4_4R2_8C, sizeof(order_COL4_4R2_8C));
+  cublasLtMatrixLayoutSetAttribute(BtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_B, sizeof(order_B));
 
   cublasLtMatrixLayoutCreate(&CtransformDesc, CUDA_R_32I, N, N, ldctransform);
   cublasLtMatrixLayoutSetAttribute(CtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL32, sizeof(order_COL32));
