@@ -1,5 +1,9 @@
+# VS code
+**/.vscode
+
 # Prerequisites
 *.d
+
 
 # Object files
 *.o
