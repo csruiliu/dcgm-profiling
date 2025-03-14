@@ -2,8 +2,9 @@
 
 This is a simple tutorial for GEMM (General Matrix Multiplication) performance evaluation.
 
-`gemm.cpp` and `cal_gemm.cpp`: Profiling for `cublasSgemm`, `cublasDgemm`, and `cublasHgemm`
-`gemm_lt.cpp` and `cal_gemm_lt.cpp`: Profiling for cublasLT
+`gemm.cpp` and `cal_gemm.cpp`: profiling for `cublasSgemm`, `cublasDgemm`, and `cublasHgemm`
+
+`gemm_lt.cpp` and `cal_gemm_lt.cpp`: profiling for cublasLT
 
 More details about cublasLT via link: https://docs.nvidia.com/cuda/cublas/#using-the-cublaslt-api
 
