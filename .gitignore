@@ -1,5 +1,7 @@
-# VS code
+# Customization
 **/.vscode
+**/*.png
+**/*.out
 
 # Prerequisites
 *.d
