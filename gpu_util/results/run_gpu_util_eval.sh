@@ -23,13 +23,11 @@ dcgm_delay=10 \
 	./wrap_dcgmi.sh \
 	./gpu_util_eval_init.x \
 	> gpu_util_eval_init.dcgmi
-done
 
 dcgm_delay=10 \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
 	./gpu_util_eval_io.x \
 	> gpu_util_eval_io.dcgmi
-done
 
 
