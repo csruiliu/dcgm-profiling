@@ -23,10 +23,9 @@ int main(int argc, char *argv[]) {
 
   std::this_thread::sleep_for(std::chrono::seconds(10));
 
-
   // Destroy all allocations and reset all state on the current device in the current process.
   cudaDeviceReset();
-  
+
   return 0;
 }
 

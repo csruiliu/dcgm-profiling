@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <thread>
 #include <chrono>
+#include <iostream>
+#include <cstdlib>
 
 #include <cuda_runtime.h>
 
@@ -10,7 +12,7 @@ int main(int argc, char *argv[])
 {
 
   size_t size = 32L * 1024 * 1024 * 1024;
-  void *x_h = malloc(SIZE);
+  void *x_h = malloc(size);
   if (x_h == nullptr)
   {
     std::cerr << "Failed to allocate host memory" << std::endl;
