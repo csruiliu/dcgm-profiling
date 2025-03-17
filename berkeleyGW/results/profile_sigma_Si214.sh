@@ -11,12 +11,12 @@
 
 source ../site_path_config.sh
 
-mkdir BGW_EPSILON_$SLURM_JOBID
-stripe_large BGW_EPSILON_$SLURM_JOBID
-cp ./wrap_dcgmi.sh BGW_EPSILON_$SLURM_JOBID
-cd    BGW_EPSILON_$SLURM_JOBID
-ln -s $BGW_DIR/epsilon.cplx.x .
-ln -s  ../epsilon.inp .
+mkdir BGW_SIGMA_$SLURM_JOBID
+stripe_large BGW_SIGMA_$SLURM_JOBID
+cp ./wrap_dcgmi.sh BGW_SIGMA_$SLURM_JOBID
+cd    BGW_SIGMA_$SLURM_JOBID
+ln -s $BGW_DIR/sigma.cplx.x .
+ln -s  ../sigma.inp .
 ln -sfn  ${Si214_WFN_folder}/WFNq.h5      .
 ln -sfn  ${Si214_WFN_folder}/WFN_out.h5   ./WFN.h5
 
