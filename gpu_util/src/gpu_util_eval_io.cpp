@@ -6,80 +6,116 @@
 
 #include <cuda_runtime.h>
 
+// ======== Configuration Macros ========
+// Uncomment for pageable host memory allocation
+#define USE_PINNED_MEMORY
+
+// Uncomment to use std::chrono for timing:
+#define TIMING_CUDA_EVENTS
+
+// ======== Constants ========
 #define NUM_COPIES 10
+const size_t SIZE = 32L * 1024 * 1024 * 1024;  // 32 GiB
 
-int main(int argc, char *argv[])
-{
+// ======== Memory Allocation Wrappers ========
+void* host_alloc(size_t size) {
+  #ifdef USE_PINNED_MEMORY
+      void* ptr;
+      cudaError_t err = cudaMallocHost(&ptr, size);
+      return (err == cudaSuccess) ? ptr : nullptr;
+  #else
+      return malloc(size);  // Default to pageable
+  #endif
+}
 
-  size_t size = 32L * 1024 * 1024 * 1024;
-  void *x_h = malloc(size);
-  if (x_h == nullptr)
-  {
-    std::cerr << "Failed to allocate host memory" << std::endl;
-    return -1;
+void host_free(void* ptr) {
+  #ifdef USE_PINNED_MEMORY
+      cudaFreeHost(ptr);
+  #else
+      free(ptr);
+  #endif
+}
+
+// ======== Timing Wrappers ========
+struct Timer {
+  #ifdef TIMING_CUDA_EVENTS
+      cudaEvent_t start, stop;
+      
+      Timer() {
+          cudaEventCreate(&start);
+          cudaEventCreate(&stop);
+      }
+      
+      ~Timer() {
+          cudaEventDestroy(start);
+          cudaEventDestroy(stop);
+      }
+      
+      void record_start() { cudaEventRecord(start); }
+      void record_stop() { cudaEventRecord(stop); }
+      double elapsed() {
+          cudaEventSynchronize(stop);
+          float ms;
+          cudaEventElapsedTime(&ms, start, stop);
+          return ms / 1000.0;
+      }
+  #else
+      std::chrono::time_point<std::chrono::high_resolution_clock> start, stop;
+      
+      void record_start() { start = std::chrono::high_resolution_clock::now(); }
+      void record_stop() { stop = std::chrono::high_resolution_clock::now(); }
+      double elapsed() {
+          return std::chrono::duration<double>(stop - start).count();
+      }
+  #endif
+};
+
+int main() {
+  // Allocate host memory
+  void* x_h = host_alloc(SIZE);
+  if(!x_h) {
+      std::cerr << "Host allocation failed" << std::endl;
+      return -1;
   }
 
-  // Initialize the GPU
-  cudaError_t err = cudaSetDevice(0);
-  if (err != cudaSuccess)
-  {
-    std::cerr << "Failed to set device: " << cudaGetErrorString(err) << std::endl;
-    free(x_h);
-    return -1;
+  // Allocate device memory
+  void* x_d;
+  cudaError_t err = cudaMalloc(&x_d, SIZE);
+  if(err != cudaSuccess) {
+      std::cerr << "Device allocation failed: " << cudaGetErrorString(err) << std::endl;
+      host_free(x_h);
+      return -1;
   }
 
-  // Allocate 32 GB on GPU
-  void *x_d;
-  err = cudaMalloc(&x_d, size);
-  if (err != cudaSuccess)
-  {
-    std::cerr << "Failed to allocate device memory: " << cudaGetErrorString(err) << std::endl;
-    free(x_h);
-    return -1;
-  }
+  // Warm-up run
+  // cudaMemcpy(x_d, x_h, SIZE, cudaMemcpyHostToDevice);
 
+  Timer timer;
   double total_time = 0.0;
 
-  // Copy data from host to device multiple times
-  for (int i = 0; i < NUM_COPIES; ++i)
-  {
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    err = cudaMemcpy(x_d, x_h, size, cudaMemcpyHostToDevice);
+  for(int i = 0; i < NUM_COPIES; ++i) {
+      timer.record_start();
+      err = cudaMemcpy(x_d, x_h, SIZE, cudaMemcpyHostToDevice);
+      timer.record_stop();
+      
+      if(err != cudaSuccess) {
+          std::cerr << "Copy failed: " << cudaGetErrorString(err) << std::endl;
+          break;
+      }
 
-    auto end = std::chrono::high_resolution_clock::now();
+      const double copy_time = timer.elapsed();
+      total_time += copy_time;
 
-    if (err != cudaSuccess)
-    {
-      std::cerr << "Failed to copy memory from host to device: " << cudaGetErrorString(err) << std::endl;
-      cudaFree(x_d);
-      free(x_h);
-      return -1;
-    }
-
-    std::chrono::duration<double> elapsed = end - start;
-    double copy_time = elapsed.count();
-    total_time += copy_time;
-
-    // Optional: Print bandwidth for each individual copy
-    double bandwidth = (size / (1024.0 * 1024.0 * 1024.0)) / copy_time; // GiB/s
-    std::cout << "Copy " << i << " bandwidth: " << bandwidth << " GiB/s" << std::endl;
+      const double bandwidth = (SIZE / 1e9) / copy_time;  // GB/s
+      std::cout << "Transfer " << i << ": " << bandwidth << " GB/s\n";
   }
 
-  // Calculate average bandwidth
-  double total_data = NUM_COPIES * (size / (1024.0 * 1024.0 * 1024.0)); // Total data in GiB
-  double avg_bandwidth = total_data / total_time; // GiB/s
+  const double avg_bandwidth = (NUM_COPIES * SIZE / 1e9) / total_time;
+  std::cout << "\nAverage PCIe bandwidth: " << avg_bandwidth << " GB/s\n";
 
-  std::cout << "Average PCIe bandwidth: " << avg_bandwidth << " GiB/s" << std::endl;
-
-  // Free device memory
+  // Cleanup
   cudaFree(x_d);
-
-  // Finalize the GPU
+  host_free(x_h);
   cudaDeviceReset();
-
-  // Free host memory
-  free(x_h);
-
   return 0;
 }
