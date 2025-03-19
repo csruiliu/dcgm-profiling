@@ -103,11 +103,11 @@ int main() {
       const double copy_time = timer.elapsed();
       total_time += copy_time;
 
-      const double bandwidth = (SIZE / 1e9) / copy_time;  // GB/s
+      const double bandwidth = (SIZE / (1024 * 1024 * 1024)) / copy_time;  // GB/s
       std::cout << "Transfer " << i << ": " << bandwidth << " GB/s\n";
   }
 
-  const double avg_bandwidth = (NUM_COPIES * SIZE / 1e9) / total_time;
+  const double avg_bandwidth = (NUM_COPIES * SIZE / (1024 * 1024 * 1024)) / total_time;
   std::cout << "\nAverage PCIe bandwidth: " << avg_bandwidth << " GB/s\n";
 
   // Cleanup
