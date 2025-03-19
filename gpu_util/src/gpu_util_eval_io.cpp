@@ -6,25 +6,23 @@
 
 #include <cuda_runtime.h>
 
-// ======== Configuration Macros ========
 // Uncomment for pageable host memory allocation
 #define USE_PINNED_MEMORY
-
 // Uncomment to use std::chrono for timing:
 #define TIMING_CUDA_EVENTS
-
-// ======== Constants ========
+// Number of copies for sending 
 #define NUM_COPIES 10
-const size_t SIZE = 32L * 1024 * 1024 * 1024;  // 32 GiB
 
-// ======== Memory Allocation Wrappers ========
+// 32 GB
+const size_t SIZE = 32L * 1024 * 1024 * 1024;  
+
 void* host_alloc(size_t size) {
   #ifdef USE_PINNED_MEMORY
       void* ptr;
       cudaError_t err = cudaMallocHost(&ptr, size);
       return (err == cudaSuccess) ? ptr : nullptr;
   #else
-      return malloc(size);  // Default to pageable
+      return malloc(size);
   #endif
 }
 
@@ -36,7 +34,6 @@ void host_free(void* ptr) {
   #endif
 }
 
-// ======== Timing Wrappers ========
 struct Timer {
   #ifdef TIMING_CUDA_EVENTS
       cudaEvent_t start, stop;
