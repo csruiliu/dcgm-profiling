@@ -162,8 +162,6 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   // tensor op igemm kernels only support NT gemm
   cublasLtMatmulDescSetAttribute(matmulDesc, CUBLASLT_MATMUL_DESC_TRANSB, &opTranspose, sizeof(opTranspose));
 
-  mprintf("MatrixLayout Creation 1...\n");
-
   // create descriptors for original matrices
   cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_8I, N, N, N);
   cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_8I, N, N, N);
@@ -172,8 +170,6 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   cublasLtMatrixLayoutCreate(&AtransformDesc, CUDA_R_8I, N, N, ldatransform);
   cublasLtMatrixLayoutSetAttribute(AtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL32, sizeof(order_COL32));
 
-  mprintf("MatrixLayout Creation 2...\n");
-
   // data memory order is set to CUBLASLT_ORDER_COL4_4R2_8C in order to achieve best performance on Turing devices.
   // for best performance on Ampere, consider setting the memory order to CUBLASLT_ORDER_COL32_2R_4R4.
   cublasLtMatrixLayoutCreate(&BtransformDesc, CUDA_R_8I, N, N, ldbtransform);
@@ -181,8 +177,6 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
 
   cublasLtMatrixLayoutCreate(&CtransformDesc, CUDA_R_32I, N, N, ldctransform);
   cublasLtMatrixLayoutSetAttribute(CtransformDesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order_COL32, sizeof(order_COL32));
-
-  mprintf("MatrixLayout Creation 3...\n");
 
   // ---------------------------------------------------------------------------------------------
   // transforms and computation
