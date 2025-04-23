@@ -12,9 +12,8 @@ def is_number(value):
     except ValueError:
         return False
 
-
 # Function to read the file and process the data
-def process_file(file_path):
+def process_file(file_path, metric_names):
     # Read the file
     with open(file_path, 'r') as file:
         lines = file.readlines()
@@ -26,43 +25,79 @@ def process_file(file_path):
         numeric_values = [float(value) for value in values if is_number(value)]
         if len(numeric_values) != 0:
             data.append(numeric_values)
-        
-    # Transpose the data to get columns
-    lowest_values = list()
-    highest_values = list()
-    has_zero_values = list()
 
-    metrics_name = ["GPUTL", "SMACT", "TENSO", "DRAMA", "FP64A", "FP32A", "FP16A", "TIMMA", "THMMA"]
-    for idx, column in enumerate(zip(*data)):
-        col_values = list(column)
-        plt.figure(figsize=(60, 12)) 
-        plt.plot(col_values, marker='o', markersize=1, linestyle='-', color='royalblue', linewidth=0.1)
+    if len(data[0]) == len(metric_names):
+        df = pd.DataFrame(data, columns=metric_names)
+        return df
+    else:
+        raise ValueError("The number of data columns doesn't match the number of metric names")
+    
+
+# Function to plot dataframe
+def plot(df, metric_names, output, dcgm_delay):
+    print(df.columns)
+    for metric in metric_names:
+        plt.figure(figsize=(15, 4)) 
         
         # Add title and labels to the plot
-        plt.title(metrics_name[idx])
-        plt.xlabel('Index')
+        plt.title(metric)
+        plt.xlabel('Time Index')
         plt.ylabel('Value')
-        if metrics_name[idx] == "GPUTL":
+        if metric == "GPUTL":
+            col_values = df[metric]
             plt.ylim(0, 110)
             plt.yticks([0, 20, 40, 60, 80, 100], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
+        elif metric == "MCUTL":
+            col_values = df[metric]
+            plt.ylim(0, 110)
+            plt.yticks([0, 20, 40, 60, 80, 100], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
+        elif metric == "PCITX":
+            col_values = [element / (1024 * 1024 * 1024) for element in df[metric]]
+            plt.ylim(0, max(col_values) * 1.1)
+            plt.ylabel('Rate of Data Transmitted over PCIe (GiB/s)')
+        elif metric == "PCIRX":
+            col_values = [element / (1024 * 1024 * 1024) for element in df[metric]]
+            plt.ylim(0, max(col_values) * 1.1)
+            plt.ylabel('Rate of Data Recevied over PCIe (GiB/s)')
+        elif metric == "POWER":
+            col_values = df[metric]
+            plt.ylim(0, col_values.max() * 1.1)
+            plt.ylabel('Watts (W)')
+            plt.xlabel('Time Index (Seconds)', fontsize=12)
+        elif metric == "TMPTR":
+            plt.ylim(0, 110) 
+            plt.ylabel('Celsius (°C)')
+            col_values = df[metric]
+        elif metric == "TOTEC":
+            col_values = [element / (1000 * 1000) for element in df[metric]]
+            plt.ylim(0, max(col_values) * 1.1) 
+            plt.ylabel('Kilojoule (KJ)')
+        elif metric == "FP64A" or metric == "FP32A" or metric == "FP16A" or metric == "TENSO":
+            plt.ylim(0, 1.1)
+            plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=12)
+            col_values = df[metric]
+            plt.ylabel('Ratio of cycles the tensor core is active', fontsize=12)
+            plt.xlabel('Time Index (Seconds)', fontsize=12)
         else:
             plt.ylim(0, 1.1)
             plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
+            col_values = df[metric]
+
+        if dcgm_delay == 1000:
+            plt.xlabel('Time Index (Seconds)', fontsize=12)
+        elif dcgm_delay == 100:
+            plt.xlabel('Time Index (Decisecond, 0.1 Seconds)', fontsize=12)
+        elif dcgm_delay == 10:
+            plt.xlabel('Time Index (Centisecond, 0.01 Seconds)', fontsize=12)
+        elif dcgm_delay == 1:
+            plt.xlabel('Time Index (Millisecond, 0.001 Seconds)', fontsize=12)
+        else:
+            raise ValueError("The sample rate is not supported")
+        
         # Show the plot
-        plt.savefig(metrics_name[idx] + '.png', dpi=300)
-
-        zeros_exist = any(num == 0 for num in col_values)
-        col_values_filtered = [num for num in col_values if num != 0]
-
-        if len(col_values_filtered) == 0:
-            col_values_filtered = [0]
-
-        has_zero_values.append(zeros_exist)
-
-        lowest_values.append(min(col_values_filtered))
-        highest_values.append(max(col_values_filtered))
-    
-    return lowest_values, highest_values, has_zero_values
+        plt.plot(col_values, marker='o', markersize=0.7, linestyle='-', color='royalblue', linewidth=0.5)
+        plt.savefig(output + "/" + metric + '.png', dpi=300, bbox_inches='tight', pad_inches=0.0)
+        
 
 
 def main():
@@ -72,14 +107,35 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', '--dcgm_file', action='store', type=str,
                         help='indicate the dcgm output file')
+    parser.add_argument('-o', '--output_path', action='store', type=str,
+                        help='indicate the output figures path')
+    parser.add_argument('-d', '--dcgm_delay', action='store', type=int, choices=[1, 10, 100, 1000],
+                        help='indicate the sample rate used for plotting')
+    parser.add_argument('--metrics', nargs='+', help='List of metrics, basically the not-none col names')
+    # metric_cols = ["GPUTL", "SMACT", "TENSO", "DRAMA", "FP64A", "FP32A", "FP16A", "TIMMA", "THMMA"]
+    # metric_cols = ["GPUTL", "MCUTL", "GRACT", "PCITX", "PCIRX"]
+    # metric_cols = ["TMPTR", "POWER", "TOTEC", "GPUTL", "SMACT", "TENSO", "DRAMA", "FP64A", "FP32A", "FP16A", "TIMMA", "THMMA"]
     args = parser.parse_args()
 
-    output_file = args.dcgm_file
+    dcgm_metric_file = args.dcgm_file
+    output_file = args.output_path
+    dcgm_delay = args.dcgm_delay
+    metric_cols = args.metrics
+    
+    df_metrics = process_file(dcgm_metric_file, metric_cols)
+    
+    plot(df_metrics, df_metrics, output_file, dcgm_delay)
+    
+    # Find the minimum value of each column
+    min_values = df_metrics.min()
 
-    # Get the minimum and maximum values for each column
-    min_values, max_values, zero_values = process_file(output_file)
+    # Find the maximum value of each column
+    max_values = df_metrics.max()
 
-    print(min_values, max_values, zero_values)
+    print("Minimum values of each column:")
+    print(min_values)
+    print("\nMaximum values of each column:")
+    print(max_values)
 
 
 if __name__=="__main__":
