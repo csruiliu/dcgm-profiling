@@ -16,12 +16,15 @@ cd src
 make 
 
 # copy gemm.x and gemm_lt.x to results folder
-cp gemm.x gemm_lt.x ../results
+cp gemm.x gemm_lt.x ../scripts
 
-# enter results folder
-cd results
+# enter scripts folder
+cd scripts
 
 # using slurm to run script to get performance results
 sbatch run_gemm.sh
 # sbatch run_gemm_lt.sh
+
+# check results in the results folder
+cd ../results
 ```
