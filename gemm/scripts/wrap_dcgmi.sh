@@ -56,7 +56,7 @@ dcgm_metrics="${dcgm_metrics%?}"
 dcgm_outfile=dcgm.d$dcgm_delay.$SLURM_JOB_ID.$SLURM_STEP_ID-$SLURM_NODEID.out
 if [[ $SLURM_LOCALID -eq 0 ]]; then
     #dcgmi dmon -d $dcgm_delay -e $dcgm_metrics > $SLURM_NODEID.dcgm &
-    dcgmi dmon -i 0 -d $dcgm_delay -e $dcgm_metrics >  $dcgm_outfile &
+    dcgmi dmon -i 0 -d $dcgm_delay -e $dcgm_metrics > ../results/$dcgm_outfile &
     dcgmi_pid=$!
 fi
 

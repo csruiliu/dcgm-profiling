@@ -11,6 +11,11 @@ export OMP_NUM_THREADS=1
 export OMP_PLACES=threads
 export OMP_PROC_BIND=spread
 
+# create results directory if not exist
+if [ ! -d "../results" ]; then
+  mkdir ../results
+fi
+
 #gemm.x args
 # 1: matrix size
 # 2: repeats
@@ -18,13 +23,13 @@ export OMP_PROC_BIND=spread
 # 4: beta
 # 5: precision
 
-for prec in D S H I; do
+for prec in D S H; do
 #run the application:
 dcgm_delay=100 \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
-	./gemm_lt.x 16384 100 1.0 1.0 $prec \
-	> "$prec"gemm_lt.dcgmi
+	./gemm.x 16384 100 1.0 1.0 $prec \
+	> ../results/"$prec"gemm.dcgmi
 done
 
 
