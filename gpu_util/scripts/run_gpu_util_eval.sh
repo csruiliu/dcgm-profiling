@@ -11,6 +11,11 @@ export OMP_NUM_THREADS=1
 export OMP_PLACES=threads
 export OMP_PROC_BIND=spread
 
+# create results directory if not exist
+if [ ! -d "../results" ]; then
+  mkdir ../results
+fi
+
 #gemm.x args
 # 1: matrix size
 # 2: repeats
