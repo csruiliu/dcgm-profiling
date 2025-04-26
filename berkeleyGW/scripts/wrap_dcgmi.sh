@@ -23,9 +23,9 @@ dcgm_metrics=""
 #dcgm_metrics+="164,"  #enforced_power_limit
 #dcgm_metrics+="190,"  #pstate
 
-dcgm_metrics+="200,"  #pcie_tx_throughput
-dcgm_metrics+="201,"  #pcie_rx_throughput
-dcgm_metrics+="203,"  #gpu_utilization
+#dcgm_metrics+="200,"  #pcie_tx_throughput
+#dcgm_metrics+="201,"  #pcie_rx_throughput
+#dcgm_metrics+="203,"  #gpu_utilization
 #dcgm_metrics+="204,"  #mem_copy_utilization
 #dcgm_metrics+="206,"  #enc_utilization
 #dcgm_metrics+="207,"  #dec_utilization
@@ -37,8 +37,8 @@ dcgm_metrics+="203,"  #gpu_utilization
 #dcgm_metrics+="252,"  #DCGM_FI_DEV_FB_TOTAL
 
 
-#dcgm_metrics+="1001," #gr_engine_active
-dcgm_metrics+="1002," #sm_active
+dcgm_metrics+="1001," #gr_engine_active
+#dcgm_metrics+="1002," #sm_active
 #dcgm_metrics+="1003," #sm_occupancy
 dcgm_metrics+="1004," #tensor_active
 dcgm_metrics+="1005," #dram_active
@@ -48,13 +48,13 @@ dcgm_metrics+="1008," #fp16_active
 
 dcgm_metrics+="1009," #pcie_tx_bytes
 dcgm_metrics+="1010," #pcie_rx_bytes
-#dcgm_metrics+="1011," #nvlink_tx_bytes
-#dcgm_metrics+="1012," #nvlink_rx_bytes
+dcgm_metrics+="1011," #nvlink_tx_bytes
+dcgm_metrics+="1012," #nvlink_rx_bytes
 
-dcgm_metrics+="1013," #tensor_imma_active
-dcgm_metrics+="1014," #tensor_hmma_active
-dcgm_metrics+="1015," #tensor_dfma_active
-dcgm_metrics+="1016," #integer_active
+#dcgm_metrics+="1013," #tensor_imma_active
+#dcgm_metrics+="1014," #tensor_hmma_active
+#dcgm_metrics+="1015," #tensor_dfma_active
+#dcgm_metrics+="1016," #integer_active
 
 dcgm_metrics="${dcgm_metrics%?}"
 
