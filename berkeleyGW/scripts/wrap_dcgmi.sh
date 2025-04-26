@@ -18,8 +18,8 @@ dcgm_metrics=""
 #dcgm_metrics+="110,"  #sm_app_clock
 #dcgm_metrics+="140,"  #memory_temp
 #dcgm_metrics+="150,"  #gpu_temp
-dcgm_metrics+="155,"  #power_utilization
-dcgm_metrics+="156,"  #total_energy_consumption
+#dcgm_metrics+="155,"  #power_utilization
+#dcgm_metrics+="156,"  #total_energy_consumption
 #dcgm_metrics+="164,"  #enforced_power_limit
 #dcgm_metrics+="190,"  #pstate
 
