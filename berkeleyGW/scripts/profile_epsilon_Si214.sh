@@ -6,7 +6,7 @@
 #SBATCH -A nstaff
 #SBATCH -J bgw_eps_Si214
 #SBATCH -C gpu
-#SBATCH -o BGW_EPSILON_%j.out
+#SBATCH -o ../results/BGW_SIGMA_%j/BGW_EPSILON_%j.out
 # #SBATCH --reservation=n10scaling
 
 source site_path_config.sh
