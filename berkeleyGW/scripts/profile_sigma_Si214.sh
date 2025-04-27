@@ -9,12 +9,19 @@
 #SBATCH -o BGW_SIGMA_%j.out
 # #SBATCH --reservation=n10scaling
 
-source ../site_path_config.sh
+source site_path_config.sh
 
-mkdir BGW_SIGMA_$SLURM_JOB_ID
-stripe_large BGW_SIGMA_$SLURM_JOB_ID
-cp ./wrap_dcgmi.sh BGW_SIGMA_$SLURM_JOB_ID
-cd    BGW_SIGMA_$SLURM_JOB_ID
+# create results directory if not exist
+if [ ! -d "../results" ]; then
+  mkdir ../results
+fi
+
+RESULTS_DIR=../results/BGW_EPSILON_$SLURM_JOBID
+
+mkdir $RESULTS_DIR
+stripe_large $RESULTS_DIR
+cp ./wrap_dcgmi.sh $RESULTS_DIR
+cd    $RESULTS_DIR
 
 ln -s $BGW_DIR/sigma.cplx.x .
 NNPOOL=2

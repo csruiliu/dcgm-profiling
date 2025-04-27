@@ -10,6 +10,8 @@ module load cray-libsci/23.12.5
 module load python 
 ```
 
+Make sure all the BerkeleyGW-related paths are correct in `scripts/site_path_config.sh`. For instance, `BerkeleyGW` folder, which contains `BerkeleyGW-master` and `berkeleygw-workflow`, should be one level above the current scripts directory.
+
 ## DCGM
 
 We use `dcgmi dmon` command to profile the performance under various metrics.
