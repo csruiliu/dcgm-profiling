@@ -1,12 +1,10 @@
-# GEMM Tutorials & Exercises
+# GEMM Performance Profiling
 
-This is a simple tutorial for GEMM (General Matrix Multiplication) performance evaluation.
+This is a simple GPU utilization profiling.
 
 `gemm.cpp` and `cal_gemm.cpp`: profiling for `cublasSgemm`, `cublasDgemm`, and `cublasHgemm`
 
 `gemm_lt.cpp` and `cal_gemm_lt.cpp`: profiling for cublasLT
-
-More details about cublasLT via link: https://docs.nvidia.com/cuda/cublas/#using-the-cublaslt-api
 
 ```bash
 # enter src folder

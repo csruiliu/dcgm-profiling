@@ -29,7 +29,7 @@ dcgm_delay=100 \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
 	./gemm_lt.x 16384 100 1.0 1.0 $prec \
-	> ../results/"$prec"gemm_lt.dcgmi
+	> ../results/"$prec"gemm_lt-$SLURM_JOBID.dcgmi
 done
 
 
