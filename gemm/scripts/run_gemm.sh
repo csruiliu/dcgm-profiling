@@ -5,6 +5,7 @@
 #SBATCH -q debug
 #SBATCH -t 00:30:00
 #SBATCH -A nstaff
+#SBATCH -o ../results/GEMM_%j/GEMM_%j.out
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1
@@ -15,6 +16,8 @@ export OMP_PROC_BIND=spread
 if [ ! -d "../results" ]; then
   mkdir ../results
 fi
+
+RESULTS_DIR=../results/GEMM_$SLURM_JOBID
 
 #gemm.x args
 # 1: matrix size
