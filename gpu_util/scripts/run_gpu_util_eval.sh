@@ -5,6 +5,7 @@
 #SBATCH -q debug
 #SBATCH -t 00:30:00
 #SBATCH -A nstaff
+#SBATCH -o ../results/GPU_UTIL_%j/GEMM_%j.out
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1
@@ -16,23 +17,26 @@ if [ ! -d "../results" ]; then
   mkdir ../results
 fi
 
+export RESULTS_DIR=../results/GPU_UTIL_${SLURM_JOBID}
+
+export DCGM_SAMPLE_RATE=100
+
 #gemm.x args
 # 1: matrix size
 # 2: repeats
 # 3: alpha
 # 4: beta
 # 5: precision
-
-dcgm_delay=10 \
+dcgm_delay=${DCGM_SAMPLE_RATE} \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
 	./gpu_util_eval_init.x \
-	> ../results/gpu_util_eval_init.dcgmi
+	> $RESULTS_DIR/gpu_util_eval_init-$SLURM_JOBID.dcgmi
 
-dcgm_delay=10 \
+dcgm_delay=${DCGM_SAMPLE_RATE} \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
 	./gpu_util_eval_io.x \
-	> ../results/gpu_util_eval_io.dcgmi
+	> $RESULTS_DIR/gpu_util_eval_io-$SLURM_JOBID.dcgmi
 
 
