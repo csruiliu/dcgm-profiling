@@ -17,7 +17,7 @@ if [ ! -d "../results" ]; then
   mkdir ../results
 fi
 
-RESULTS_DIR=../results/GEMM_LT_$SLURM_JOBID
+export RESULTS_DIR=../results/GEMM_LT_${SLURM_JOBID}
 
 #gemm.x args
 # 1: matrix size
@@ -32,7 +32,7 @@ dcgm_delay=100 \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
 	./gemm_lt.x 16384 100 1.0 1.0 $prec \
-	> $RESULTS_DIR/"$prec"gemm_lt-$SLURM_JOBID.dcgmi
+	> ${RESULTS_DIR}/"$prec"gemm_lt-${SLURM_JOBID}.dcgmi
 done
 
 
