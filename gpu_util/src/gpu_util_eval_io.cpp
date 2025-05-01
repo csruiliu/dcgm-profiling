@@ -126,9 +126,11 @@ int main()
         std::cout << "Transfer " << i << ": " << bandwidth << " GiB/s\n";
     }
 
+    std::cout << "\nTotal Time for Data Transferring: " << total_time << " s\n";
+
     const double avg_bandwidth = NUM_COPIES * SIZE / ((1024 * 1024 * 1024) * total_time);
     std::cout << "\nAverage PCIe bandwidth: " << avg_bandwidth << " GiB/s\n";
-
+    
     // Cleanup
     cudaFree(x_d);
     host_free(x_h);
