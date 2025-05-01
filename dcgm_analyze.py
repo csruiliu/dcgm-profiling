@@ -5,6 +5,10 @@ import re
 import matplotlib.pyplot as plt
 
 
+# Define a custom argument type for a list of strings
+def list_of_strings(arg):
+    return arg.split(',')
+
 def is_number(value):
     try:
         float(value)
@@ -23,9 +27,10 @@ def process_file(file_path, metric_names):
         # Split the line by three or more spaces
         values = re.split(r'\s{3,}', line.strip())
         numeric_values = [float(value) for value in values if is_number(value)]
+        
         if len(numeric_values) != 0:
             data.append(numeric_values)
-
+  
     if len(data[0]) == len(metric_names):
         df = pd.DataFrame(data, columns=metric_names)
         return df
@@ -104,14 +109,16 @@ def main():
     ###################################
     # get all parameters
     ###################################
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-f', '--dcgm_file', action='store', type=str,
                         help='indicate the dcgm output file')
     parser.add_argument('-o', '--output_path', action='store', type=str,
                         help='indicate the output figures path')
     parser.add_argument('-d', '--dcgm_delay', action='store', type=int, choices=[1, 10, 100, 1000],
-                        help='indicate the sample rate used for plotting')
-    parser.add_argument('--metrics', nargs='+', help='List of metrics, basically the not-none col names')
+                        help='indicate the sample rate used for plotting') 
+    parser.add_argument('--metrics', type=list_of_strings, help='List of metrics, basically the not-none col names')
+    parser.add_argument('-h', '--help', action='help',
+                        help='Example: python3 dcgm_analyze.py -f gpu_util/results/xx.100.out -o ./gpu_util/results -d 100 --metrics GRACT,PCITX,PCIRX')
     # metric_cols = ["GPUTL", "SMACT", "TENSO", "DRAMA", "FP64A", "FP32A", "FP16A", "TIMMA", "THMMA"]
     # metric_cols = ["GPUTL", "MCUTL", "GRACT", "PCITX", "PCIRX"]
     # metric_cols = ["TMPTR", "POWER", "TOTEC", "GPUTL", "SMACT", "TENSO", "DRAMA", "FP64A", "FP32A", "FP16A", "TIMMA", "THMMA"]
