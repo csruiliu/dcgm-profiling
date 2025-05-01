@@ -3,6 +3,7 @@
 **/*.png
 **/*.out
 **/*.zip
+**/results
 
 # Prerequisites
 *.d
