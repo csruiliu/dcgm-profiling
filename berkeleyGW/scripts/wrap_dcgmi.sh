@@ -31,10 +31,11 @@ dcgm_metrics=""
 #dcgm_metrics+="207,"  #dec_utilization
 #dcgm_metrics+="210,"  #mem_util_samples
 #dcgm_metrics+="211,"  #gpu_util_samples
-#dcgm_metrics+="246,"  #DCGM_FI_DEV_MEM_COPY_UTIL
-#dcgm_metrics+="250,"  #DCGM_FI_DEV_FB_USED
-#dcgm_metrics+="251,"  #DCGM_FI_DEV_FB_FREE
-#dcgm_metrics+="252,"  #DCGM_FI_DEV_FB_TOTAL
+#dcgm_metrics+="250,"  #FB_TOTAL, Total Frame Buffer of the GPU in MB.
+#dcgm_metrics+="251,"  #FB_FREE, Free Frame Buffer in MB.
+#dcgm_metrics+="252,"  #FB_USED, Used Frame Buffer in MB.
+#dcgm_metrics+="253,"  #FB_RESERVED, Reserved Frame Buffer in MB.
+#dcgm_metrics+="254,"  #FB_USED_PERCENT, Percentage used of Frame Buffer: ‘Used/(Total - Reserved)’.
 
 
 dcgm_metrics+="1001," #gr_engine_active
