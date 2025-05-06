@@ -2,13 +2,16 @@
 CC = CC
 CFLAGS = --std c++11 -O3 -DUSE_CUBLAS -I$(CUDA_ROOT)/include
 
-all: gpu_util_eval_init.x gpu_util_eval_io.x
+all: eval_init.x eval_io_pcie.x eval_io_nvlink.x
 
-gpu_util_eval_init.x: gpu_util_eval_init.cpp Makefile
-	$(CC) $(CFLAGS) -o gpu_util_eval_init.x gpu_util_eval_init.cpp
+eval_init.x: eval_init.cpp Makefile
+	$(CC) $(CFLAGS) -o eval_init.x eval_init.cpp
 
-gpu_util_eval_io.x: gpu_util_eval_io.cpp Makefile
-	$(CC) $(CFLAGS) -o gpu_util_eval_io.x gpu_util_eval_io.cpp
+eval_io_pcie.x: eval_io_pcie.cpp Makefile
+	$(CC) $(CFLAGS) -o eval_io_pcie.x eval_io_pcie.cpp
+
+eval_io_nvlink.x: eval_io_nvlink.cpp Makefile
+	$(CC) $(CFLAGS) -o eval_io_nvlinke.x eval_io_nvlink.cpp -lnccl
 
 clean:
 	rm -f *.x *~
