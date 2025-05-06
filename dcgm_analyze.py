@@ -64,6 +64,14 @@ def plot(df, metric_names, output, dcgm_delay):
             col_values = [element / (1024 * 1024 * 1024) for element in df[metric]]
             plt.ylim(0, max(col_values) * 1.1)
             plt.ylabel('Rate of Data Recevied over PCIe (GiB/s)')
+        elif metric == "NVLINKTX":
+            col_values = [element / (1024 * 1024 * 1024) for element in df[metric]]
+            plt.ylim(0, max(col_values) * 1.1)
+            plt.ylabel('Rate of Data Transmitted over NVLINK (GiB/s)')
+        elif metric == "NVLINKRX":
+            col_values = [element / (1024 * 1024 * 1024) for element in df[metric]]
+            plt.ylim(0, max(col_values) * 1.1)
+            plt.ylabel('Rate of Data Recevied over NVLINK (GiB/s)')
         elif metric == "POWER":
             col_values = df[metric]
             plt.ylim(0, col_values.max() * 1.1)
@@ -105,7 +113,7 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-o', '--output_path', action='store', type=str,
                         help='indicate the output figures path')
-    parser.add_argument('-d', '--dcgm_delay', action='store', type=int, choices=[1, 10, 100, 1000, 10000],
+    parser.add_argument('-d', '--dcgm_delay', action='store', type=int,
                         help='indicate the sample rate used for plotting') 
     parser.add_argument('--metrics', type=list_of_strings, help='List of metrics, basically the not-none col names')
     parser.add_argument('-h', '--help', action='help',
