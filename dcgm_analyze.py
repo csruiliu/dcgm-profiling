@@ -88,16 +88,7 @@ def plot(df, metric_names, output, dcgm_delay):
             plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
             col_values = df[metric]
 
-        if dcgm_delay == 1000:
-            plt.xlabel('Time Index (Seconds)', fontsize=12)
-        elif dcgm_delay == 100:
-            plt.xlabel('Time Index (Decisecond, 0.1 Seconds)', fontsize=12)
-        elif dcgm_delay == 10:
-            plt.xlabel('Time Index (Centisecond, 0.01 Seconds)', fontsize=12)
-        elif dcgm_delay == 1:
-            plt.xlabel('Time Index (Millisecond, 0.001 Seconds)', fontsize=12)
-        else:
-            raise ValueError("The sample rate is not supported")
+        plt.xlabel(f'Time Interval: {dcgm_delay} ms', fontsize=12)
         
         # Show the plot
         plt.plot(col_values, marker='o', markersize=0.7, linestyle='-', color='royalblue', linewidth=0.5)
@@ -114,7 +105,7 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-o', '--output_path', action='store', type=str,
                         help='indicate the output figures path')
-    parser.add_argument('-d', '--dcgm_delay', action='store', type=int, choices=[1, 10, 100, 1000],
+    parser.add_argument('-d', '--dcgm_delay', action='store', type=int, choices=[1, 10, 100, 1000, 10000],
                         help='indicate the sample rate used for plotting') 
     parser.add_argument('--metrics', type=list_of_strings, help='List of metrics, basically the not-none col names')
     parser.add_argument('-h', '--help', action='help',
