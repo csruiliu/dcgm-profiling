@@ -30,13 +30,7 @@ export DCGM_SAMPLE_RATE=100
 dcgm_delay=${DCGM_SAMPLE_RATE} \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
-	./gpu_util_eval_init.x \
-	> $RESULTS_DIR/gpu_util_eval_init-$SLURM_JOBID.dcgmi
-
-dcgm_delay=${DCGM_SAMPLE_RATE} \
-	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
-	./wrap_dcgmi.sh \
-	./gpu_util_eval_io.x \
+	./eval_io_nvlink.x \
 	> $RESULTS_DIR/gpu_util_eval_io-$SLURM_JOBID.dcgmi
 
 
