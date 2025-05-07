@@ -2,9 +2,12 @@
 
 This is a simple performance evaluation for GPU utilization
 
-`gpu_util_eval_init.cpp`: profiling GPU utlization when initializing GPUs.   
+`eval_init.cpp`: profiling GPU utlization when initializing GPUs.   
 
-`gpu_util_eval_io.cpp`: profiling GPU utilization when transferring data between host and GPU.
+`eval_io_pcie.cpp`: profiling GPU utilization when transferring data between host and a single GPU.
+
+`eval_io_nvlink.cpp`: profiling GPU utilization when transferring data between host and mutiple GPUs using NVLINK.
+
 
 ```bash
 # enter src folder
@@ -13,15 +16,16 @@ cd src
 # build binary code *.x 
 make 
 
-# copy gpu_util_eval_init.x and gpu_util_eval_io.x to results folder
-cp gpu_util_eval_init.x gpu_util_eval_io.x ../scripts
+# copy binary code to results folder
+cp *.x ../scripts
 
 # enter scripts folder
 cd scripts
 
 # using slurm to run script to get performance results
-sbatch run_gpu_util_eval.sh
-# sbatch run_gemm_lt.sh
+sbatch run_eval_init.sh
+sbatch run_eval_io_pcie.sh
+sbatch run_eval_io_nvlink.sh
 
 # check results in the results folder
 cd ../results
