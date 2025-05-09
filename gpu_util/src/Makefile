@@ -13,7 +13,7 @@ eval_io_pcie.x: eval_io_pcie.cpp Makefile
 	$(CC) $(CFLAGS) $(LDFLAGS) -o eval_io_pcie.x eval_io_pcie.cpp
 
 eval_io_nvlink.x: eval_io_nvlink.cpp Makefile
-	$(CXX_MPI) $(CFLAGS) $(LDFLAGS) -o eval_io_nvlinke.x eval_io_nvlink.cpp
+	$(CC) $(CFLAGS) $(LDFLAGS) -o eval_io_nvlinke.x eval_io_nvlink.cpp
 
 clean:
 	rm -f *.x *~
