@@ -273,9 +273,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    std::cout << "\nTotal Time for Data Transferring via NVLink: " << total_time << " s\n";
+    std::cout << "\n Rank "<< mpi_rank << ": Total Time for Data Transferring via NVLink: " << total_time << " s\n";
 
-    std::cout << "\nTotal Time for GPU <-> Host Data Transferring and MPI_Allreduce on host: " << total_time << " s\n";
+    std::cout << "\n Rank "<< mpi_rank << ": Time for GPU <-> Host Data Transferring and MPI_Allreduce on host: " << total_time << " s\n";
 
     cudaFree(x_d);
     cudaFreeHost(h_send_buf);
