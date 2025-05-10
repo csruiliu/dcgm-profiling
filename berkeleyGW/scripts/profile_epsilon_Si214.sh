@@ -7,7 +7,9 @@
 #SBATCH -J bgw_eps_Si214
 #SBATCH -C gpu
 #SBATCH -o ../results/BGW_EPSILON_%j/BGW_EPSILON_%j.out
+#SBATCH --exclusive
 # #SBATCH --reservation=n10scaling
+
 
 source site_path_config.sh
 
@@ -46,3 +48,5 @@ end=$(date +%s.%N)
 elapsed=$(printf "%s - %s\n" $end $start | bc -l)
 
 printf "Elapsed Time: %.2f seconds\n" $elapsed > epsilon_d${DCGM_SAMPLE_RATE}_runtime.out
+
+rm -f eps0mat.h5
