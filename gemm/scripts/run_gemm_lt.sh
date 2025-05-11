@@ -19,7 +19,9 @@ fi
 
 export RESULTS_DIR=../results/GEMM_LT_${SLURM_JOBID}
 
-#gemm.x args
+export DCGM_SAMPLE_RATE=100
+
+#gemm_lt.x args
 # 1: matrix size
 # 2: repeats
 # 3: alpha
@@ -28,7 +30,7 @@ export RESULTS_DIR=../results/GEMM_LT_${SLURM_JOBID}
 
 for prec in D S H I; do
 #run the application:
-dcgm_delay=100 \
+dcgm_delay=${DCGM_SAMPLE_RATE} \
 	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
 	./wrap_dcgmi.sh \
 	./gemm_lt.x 16384 100 1.0 1.0 $prec \
