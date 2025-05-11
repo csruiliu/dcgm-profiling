@@ -15,6 +15,8 @@
 #define NUM_COPIES 10
 // Sleep time in milliseconds
 #define SLEEP_TIME 5000
+// Number of GPUs in a node
+#define NUM_NODE_GPUS 4
 
 // Size for data transfer in total (32 GB)
 const size_t SIZE = 32L * 1024 * 1024 * 1024;
@@ -44,22 +46,19 @@ struct Timer {
 #ifdef TIMING_CUDA_EVENTS
     cudaEvent_t start, stop;
 
-    Timer()
-    {
+    Timer() {
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
     }
 
-    ~Timer()
-    {
+    ~Timer() {
         cudaEventDestroy(start);
         cudaEventDestroy(stop);
     }
 
     void record_start() { cudaEventRecord(start); }
     void record_stop() { cudaEventRecord(stop); }
-    double elapsed()
-    {
+    double elapsed() {
         cudaEventSynchronize(stop);
         float ms;
         cudaEventElapsedTime(&ms, start, stop);
@@ -70,8 +69,7 @@ struct Timer {
 
     void record_start() { start = std::chrono::high_resolution_clock::now(); }
     void record_stop() { stop = std::chrono::high_resolution_clock::now(); }
-    double elapsed()
-    {
+    double elapsed() {
         return std::chrono::duration<double>(stop - start).count();
     }
 #endif
@@ -85,9 +83,9 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
     
     // Check number of MPI processes
-    if (mpi_size != 4) {
+    if (mpi_size != NUM_NODE_GPUS) {
         if (mpi_rank == 0)
-            std::cerr << "This program assumes 4 MPI processes" << std::endl;
+            std::cerr << "This program assumes "<<  <<" MPI processes" << std::endl;
         MPI_Finalize();
         return 1;
     } 
