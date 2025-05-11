@@ -15,28 +15,22 @@ int roundoff(int v, int d) {
 }
 
 static inline void
-alloc_gemm_int(int N,
-               gemm_lt_a **pmatrixA,
-               gemm_lt_b **pmatrixB,
-               gemm_lt_c **pmatrixC)
-{
+alloc_gemm_int(int N, gemm_lt_a **pmatrixA, gemm_lt_b **pmatrixB, gemm_lt_c **pmatrixC) {
   // Calculate proper leading dimensions
   // int lda = 32 * N;
   // int ldb = 32 * roundoff(N, 32);
   // int ldc = 32 * N;
 
-  mprintf("Allocating Matrices...\n");
+  printf("Allocating Matrices...\n");
   // Allocate with proper padded dimensions
   gemm_lt_a *__restrict__ matrixA = (gemm_lt_a *)malloc(sizeof(gemm_lt_a) * N * N);
   gemm_lt_b *__restrict__ matrixB = (gemm_lt_b *)malloc(sizeof(gemm_lt_b) * N * N);
   gemm_lt_c *__restrict__ matrixC = (gemm_lt_c *)malloc(sizeof(gemm_lt_c) * N * N);
 
-  mprintf("Allocation complete, populating with values...\n");
+  printf("Allocation complete, populating with values...\n");
 #pragma omp parallel for
-  for (int i = 0; i < N; i++)
-  {
-    for (int j = 0; j < N; j++)
-    {
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
       matrixA[i * N + j] = rand();               
       matrixB[i * N + j] = rand();
       matrixC[i * N + j] = rand();
@@ -50,20 +44,14 @@ alloc_gemm_int(int N,
 }
 
 static inline long long int
-check_gemm_int(int N,
-               gemm_lt_a *matrixA,
-               gemm_lt_b *matrixB,
-               gemm_lt_c *matrixC)
-{
-  mprintf("Calculating matrix check...\n");
+check_gemm_int(int N, gemm_lt_a *matrixA, gemm_lt_b *matrixB, gemm_lt_c *matrixC) {
+  printf("Calculating matrix check...\n");
   
   // double final_sum = 0;
   long long int count = 0;
 #pragma omp parallel for reduction(+ : final_sum, count)
-  for (int i = 0; i < N; i++)
-  {
-    for (int j = 0; j < N; j++)
-    {
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
       // final_sum += matrixC[i*N + j];
       // printf("matrixC[i*N + j] %f \n",__half2float(matrixC[i*N + j]));
       count++;
@@ -74,10 +62,7 @@ check_gemm_int(int N,
 }
 
 static inline void
-free_gemm_int(gemm_lt_a *matrixA,
-              gemm_lt_b *matrixB,
-              gemm_lt_c *matrixC)
-{
+free_gemm_int(gemm_lt_a *matrixA, gemm_lt_b *matrixB, gemm_lt_c *matrixC) {
   free(matrixA);
   free(matrixB);
   free(matrixC);
@@ -87,9 +72,8 @@ free_gemm_int(gemm_lt_a *matrixA,
 
 static inline double
 calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
-              gemm_lt_a *matrixA, gemm_lt_b *matrixB, gemm_lt_c *matrixC)
-{
-  mprintf("Performing multiplication...\n");
+              gemm_lt_a *matrixA, gemm_lt_b *matrixB, gemm_lt_c *matrixC) {
+  printf("Performing multiplication...\n");
 
   gemm_lt_alpha alpha = dalpha;
   gemm_lt_beta beta = dbeta;
@@ -119,8 +103,7 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   cublasStatus_t status;
   cublasLtHandle_t ltHandle;
   status = cublasLtCreate(&ltHandle);
-  if (status != CUBLAS_STATUS_SUCCESS)
-  {
+  if (status != CUBLAS_STATUS_SUCCESS) {
     printf("ERROR: creating a device handle\n");
     exit(1);
   }
@@ -134,8 +117,7 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   errorA = cudaMalloc(reinterpret_cast<void**>(&d_matrixA), sizeof(gemm_lt_a) * N * N);
   errorB = cudaMalloc(reinterpret_cast<void**>(&d_matrixB), sizeof(gemm_lt_b) * N * N);
   errorC = cudaMalloc(reinterpret_cast<void**>(&d_matrixC), sizeof(gemm_lt_c) * N * N);
-  if ((errorA != cudaSuccess) || (errorB != cudaSuccess) || (errorC != cudaSuccess))
-  {
+  if ((errorA != cudaSuccess) || (errorB != cudaSuccess) || (errorC != cudaSuccess)) {
     printf("ERROR: allocating device matrices\n");
     exit(1);
   }
@@ -144,13 +126,12 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
   statusA = cublasSetMatrix(N, N, sizeof(gemm_lt_a), matrixA, N, d_matrixA, N);
   statusB = cublasSetMatrix(N, N, sizeof(gemm_lt_b), matrixB, N, d_matrixB, N);
   statusC = cublasSetMatrix(N, N, sizeof(gemm_lt_c), matrixC, N, d_matrixC, N);
-  if ((statusA != CUBLAS_STATUS_SUCCESS) || (statusB != CUBLAS_STATUS_SUCCESS) || (statusC != CUBLAS_STATUS_SUCCESS))
-  {
+  if (statusA != CUBLAS_STATUS_SUCCESS || statusB != CUBLAS_STATUS_SUCCESS || statusC != CUBLAS_STATUS_SUCCESS) {
     printf("ERROR: intializing device matrices\n");
     exit(1);
   }
 
-  mprintf("cudaMalloc...\n");
+  printf("cudaMalloc...\n");
 
   cudaMalloc(reinterpret_cast<void**>(&Atransform), sizeof(gemm_lt_a) * ldatransform * N);
   cudaMalloc(reinterpret_cast<void**>(&Btransform), sizeof(gemm_lt_b) * ldbtransform * N);
@@ -188,12 +169,11 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
 
   cublasLtMatrixTransform(ltHandle, transformDesc, &transformAlpha, d_matrixB, Bdesc, &transformBeta, NULL, NULL, Btransform, BtransformDesc, 0);
 
-  mprintf("Transformation ...\n");
+  printf("Transformation ...\n");
 
   // Repeat multiple times
   const double start = get_seconds();
-  for (int r = 0; r < repeats; r++)
-  {
+  for (int r = 0; r < repeats; r++) {
     cublasStatus_t matmulStatus;
     matmulStatus = cublasLtMatmul(ltHandle,
                                   matmulDesc,
@@ -212,8 +192,7 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
                                   0,       // workspace size
                                   0);      // stream
 
-    if (matmulStatus != CUBLAS_STATUS_SUCCESS)
-    {
+    if (matmulStatus != CUBLAS_STATUS_SUCCESS) {
       printf("cublasLtMatmul failed with error %d\n", matmulStatus);
       exit(1);
     }
@@ -263,20 +242,14 @@ calc_gemm_int(int repeats, int N, double dalpha, double dbeta,
 #endif
 
 static inline void
-alloc_gemm(int N,
-           gemm_t **pmatrixA,
-           gemm_t **pmatrixB,
-           gemm_t **pmatrixC,
-           gemm_t **pmatrixD)
-{
-
-  mprintf("Allocating Matrices...\n");
+alloc_gemm(int N, gemm_t **pmatrixA, gemm_t **pmatrixB, gemm_t **pmatrixC, gemm_t **pmatrixD) {
+  printf("Allocating Matrices...\n");
   gemm_t *__restrict__ matrixA = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
   gemm_t *__restrict__ matrixB = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
   gemm_t *__restrict__ matrixC = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
   gemm_t *__restrict__ matrixD = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
 
-  mprintf("Allocation complete, populating with values...\n");
+  printf("Allocation complete, populating with values...\n");
 #pragma omp parallel for
   for (int i = 0; i < N; i++)
   {
@@ -297,21 +270,14 @@ alloc_gemm(int N,
 }
 
 static inline long long int
-check_gemm(int N,
-           gemm_t *matrixA,
-           gemm_t *matrixB,
-           gemm_t *matrixC,
-           gemm_t *matrixD)
-{
-  mprintf("Calculating matrix check...\n");
+check_gemm(int N, gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC, gemm_t *matrixD) {
+  printf("Calculating matrix check...\n");
 
   // double final_sum = 0;
   long long int count = 0;
 #pragma omp parallel for reduction(+ : final_sum, count)
-  for (int i = 0; i < N; i++)
-  {
-    for (int j = 0; j < N; j++)
-    {
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
       // final_sum += matrixC[i*N + j];
       // printf("matrixC[i*N + j] %f \n",__half2float(matrixC[i*N + j]));
       count++;
@@ -322,11 +288,7 @@ check_gemm(int N,
 }
 
 static inline void
-free_gemm(gemm_t *matrixA,
-          gemm_t *matrixB,
-          gemm_t *matrixC,
-          gemm_t *matrixD)
-{
+free_gemm(gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC, gemm_t *matrixD) {
   free(matrixA);
   free(matrixB);
   free(matrixC);
@@ -336,9 +298,8 @@ free_gemm(gemm_t *matrixA,
 
 static inline double
 calc_gemm(int repeats, int N, double dalpha, double dbeta,
-          gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC, gemm_t *matrixD)
-{
-  mprintf("Performing multiplication...\n");
+          gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC, gemm_t *matrixD) {
+  printf("Performing multiplication...\n");
 
   gemm_t alpha = dalpha;
   gemm_t beta = dbeta;
@@ -349,8 +310,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   errorB = cudaMalloc((void **)&d_matrixB, N * N * sizeof(gemm_t));
   errorC = cudaMalloc((void **)&d_matrixC, N * N * sizeof(gemm_t));
   errorD = cudaMalloc((void **)&d_matrixD, N * N * sizeof(gemm_t));
-  if ((errorA != cudaSuccess) || (errorB != cudaSuccess) || (errorC != cudaSuccess) || (errorD != cudaSuccess))
-  {
+  if (errorA != cudaSuccess || errorB != cudaSuccess || errorC != cudaSuccess || errorD != cudaSuccess) {
     printf("ERROR: allocating device matrices\n");
     exit(1);
   }
@@ -359,8 +319,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   cublasStatus_t status;
   cublasLtHandle_t ltHandle;
   status = cublasLtCreate(&ltHandle);
-  if (status != CUBLAS_STATUS_SUCCESS)
-  {
+  if (status != CUBLAS_STATUS_SUCCESS) {
     printf("ERROR: creating a device handle\n");
     exit(1);
   }
@@ -393,16 +352,14 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   statusB = cublasSetMatrix(N, N, sizeof(gemm_t), matrixB, N, d_matrixB, N);
   statusC = cublasSetMatrix(N, N, sizeof(gemm_t), matrixC, N, d_matrixC, N);
   statusD = cublasSetMatrix(N, N, sizeof(gemm_t), matrixD, N, d_matrixD, N);
-  if ((statusA != CUBLAS_STATUS_SUCCESS) || (statusB != CUBLAS_STATUS_SUCCESS) || (statusC != CUBLAS_STATUS_SUCCESS) || (statusD != CUBLAS_STATUS_SUCCESS))
-  {
+  if (statusA != CUBLAS_STATUS_SUCCESS || statusB != CUBLAS_STATUS_SUCCESS || statusC != CUBLAS_STATUS_SUCCESS || statusD != CUBLAS_STATUS_SUCCESS) {
     printf("ERROR: intializing device matrices\n");
     exit(1);
   }
 
   // Repeat multiple times
   const double start = get_seconds();
-  for (int r = 0; r < repeats; r++)
-  {
+  for (int r = 0; r < repeats; r++) {
     cublasStatus_t matmulStatus;
     matmulStatus = cublasLtMatmul(ltHandle,
                                   matmulDesc,
@@ -421,8 +378,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
                                   0,       // workspace size
                                   0);      // stream
 
-    if (matmulStatus != CUBLAS_STATUS_SUCCESS)
-    {
+    if (matmulStatus != CUBLAS_STATUS_SUCCESS) {
       printf("cublasLtMatmul failed with error %d\n", matmulStatus);
       exit(1);
     }
