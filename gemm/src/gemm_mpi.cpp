@@ -1,330 +1,303 @@
 #include <stdio.h>
-#include <stdlib.h>
+#include <iostream>
+#include <cstdlib>
+#include <chrono>
+#include <mpi.h>
 #include <sys/time.h>
 
-#if (PRECISION==1)
-#  define gemm_t float
-#elif (PRECISION==3)
-#  define gemm_t __half
-#else
-#  define gemm_t double
-#endif
+#include <cuda_runtime.h>
+#include "cublas_v2.h"
+#include <cuda_fp16.h>
 
-int mpi_thread=0;
-int mpi_rank=0;
-int mpi_size=1;
-#ifdef USE_MPI
-#include <mpi.h>
-#define mprintf if( mpi_rank==0 ) printf
-#else
-#define mprintf printf
-#endif
+// Uncomment for pageable host memory allocation
+#define USE_PINNED_MEMORY
+// Uncomment to use std::chrono for timing:
+#define TIMING_CUDA_EVENTS
+// Number of copies for sending
+#define NUM_COPIES 10
+// Sleep time in milliseconds
+#define SLEEP_TIME 5000
+// Number of GPUs in a node
+#define NUM_NODE_GPUS 4
 
 // ------------------------------------------------------- //
 // Function: get_seconds
 // ------------------------------------------------------- //
 double get_seconds() {
-
-#ifdef USE_MPI
-  MPI_Barrier( MPI_COMM_WORLD );
-#endif
-
   struct timeval now;
   gettimeofday(&now, NULL);
-
-  const double seconds = (double) now.tv_sec;
-  const double usec    = (double) now.tv_usec;
-
+  const double seconds = (double)now.tv_sec;
+  const double usec = (double)now.tv_usec;
   return seconds + (usec * 1.0e-6);
 }
 
-#if defined( USE_MKL ) || defined (USE_CBLAS)
-// ------------------------------------------------------- //
-// CBLAS interface version
-// ------------------------------------------------------- //
-#ifdef USE_CBLAS
-#  include "cblas.h"
-#elif USE_MKL
-#  include "mkl.h"
-#endif
+#define PRECISION 'S'
+#include "calc_gemm_mpi.cpp"
+#undef PRECISION
 
+#define PRECISION 'D'
+#include "calc_gemm_mpi.cpp"
+#undef PRECISION
 
+#define PRECISION 'H'
+#include "calc_gemm_mpi.cpp"
+#undef PRECISION
 
-static inline double calc_gemm(int repeats, int N, gemm_t alpha, gemm_t beta, 
-                             gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
-  // Repeat multiple times
-  const double start = get_seconds();
-  for (int r = 0; r < repeats; r++) {
-#if (PRECISION==1)
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
-                N, N, N, alpha, matrixA, N, matrixB, N, beta, matrixC, N);
-#else
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
-                N, N, N, alpha, matrixA, N, matrixB, N, beta, matrixC, N);
-#endif
-  }
-  const double end = get_seconds();
-
-  return(end - start);
-}
-
-#elif defined ( USE_CUBLAS ) || defined (USE_HIPBLAS)
-// ------------------------------------------------------- //
-// CUBLAS/HIPBLAS interface version
-// ------------------------------------------------------- //
-#ifdef USE_HIPBLAS
-#  include <hip/hip_runtime.h>
-#  include <hipblas.h>
-//#  include <hip/hip_fp16.h>
-#  define cudaDeviceSynchronize hipDeviceSynchronize
-#  define cudaMalloc hipMalloc
-#  define cudaFree hipFree
-#  define cudaSuccess hipSuccess
-#  define cudaError_t hipError_t
-#  define cublasStatus_t hipblasStatus_t
-#  define cublasHandle_t hipblasHandle_t
-#  define cublasCreate hipblasCreate
-#  define cublasSetMatrix hipblasSetMatrix
-#  define cublasSetMatrix hipblasSetMatrix
-#  define cublasGetMatrix hipblasGetMatrix
-#  define cublasDgemm hipblasDgemm
-#  define cublasSgemm hipblasSgemm
-#  define cublasDestroy hipblasDestroy
-#  define CUBLAS_STATUS_SUCCESS HIPBLAS_STATUS_SUCCESS
-#  define CUBLAS_OP_N HIPBLAS_OP_N
-#else
-#  include <cuda_runtime.h>
-#  include "cublas_v2.h"
-#  include <cuda_fp16.h>
-#endif
-
-static inline double calc_gemm(int repeats, int N, gemm_t alpha, gemm_t beta,
-                             gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
-
-  cudaError_t errorA, errorB, errorC;
-  gemm_t *d_matrixA, *d_matrixB, *d_matrixC;
-  errorA = cudaMalloc ((void**)&d_matrixA, N*N*sizeof(gemm_t));
-  errorB = cudaMalloc ((void**)&d_matrixB, N*N*sizeof(gemm_t));
-  errorC = cudaMalloc ((void**)&d_matrixC, N*N*sizeof(gemm_t));
-  if(  (errorA != cudaSuccess) 
-    || (errorB != cudaSuccess) 
-    || (errorC != cudaSuccess) ) { 
-    printf("ERROR: allocating device matrices\n"); 
-    exit(1); 
-  }
-
-  cublasStatus_t status;
-  cublasHandle_t handle;
-  status = cublasCreate(&handle);
-  if( status != CUBLAS_STATUS_SUCCESS ) { 
-    printf("ERROR: creating a device handle\n"); 
-    exit(1); 
-  }
-
-  //status = cublasSetMathMode(handle, CUBLAS_PEDANTIC_MATH);
-#if (PRECISION==1)
-  status = cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH);
-#endif
-  cublasStatus_t statusA, statusB, statusC;
-  statusA = cublasSetMatrix (N, N, sizeof(gemm_t), matrixA, N, d_matrixA, N);
-  statusB = cublasSetMatrix (N, N, sizeof(gemm_t), matrixB, N, d_matrixB, N);
-  statusC = cublasSetMatrix (N, N, sizeof(gemm_t), matrixC, N, d_matrixC, N);
-  if(  (statusA != CUBLAS_STATUS_SUCCESS) 
-    || (statusB != CUBLAS_STATUS_SUCCESS) 
-    || (statusC != CUBLAS_STATUS_SUCCESS) ) { 
-    printf("ERROR: intializing device matrices\n"); 
-    exit(1); 
-  }
-
-  // Repeat multiple times
-  const double start = get_seconds();
-  for (int r = 0; r < repeats; r++) {
-#if (PRECISION==1)
-    cublasSgemm( handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
-                 &alpha, d_matrixA, N, d_matrixB, N, &beta, d_matrixC, N );
-#elif (PRECISION==3)
-    cublasHgemm( handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
-                 &alpha, d_matrixA, N, d_matrixB, N, &beta, d_matrixC, N );
-#else
-    cublasDgemm( handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
-                 &alpha, d_matrixA, N, d_matrixB, N, &beta, d_matrixC, N );
-#endif
-  }
-  cudaDeviceSynchronize();
-  const double end = get_seconds();
-
-  cublasGetMatrix(N, N, sizeof(gemm_t), d_matrixC, N, matrixC, N);
-  cudaFree(d_matrixA);
-  cudaFree(d_matrixB);
-  cudaFree(d_matrixC);
-  cublasDestroy(handle);
-
-  return(end-start);
-}
-
-#else
-// ------------------------------------------------------- //
-// OpenMP version
-// ------------------------------------------------------- //
-static inline double calc_gemm(int repeats, int N, gemm_t alpha, gemm_t beta, 
-                             gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
-  // Repeat multiple times
-  const double start = get_seconds();
-  for (int r = 0; r < repeats; r++) {
-    #pragma omp parallel for
-    for (int i = 0; i < N; i++) {
-      for (int j = 0; j < N; j++) {
-        gemm_t sum = 0;
-        for (int k = 0; k < N; k++)
-          sum += matrixA[i*N + k] * matrixB[k*N + j];
-        matrixC[i*N + j] = (alpha * sum) + (beta * matrixC[i*N + j]);
-      }
-    }
-  }
-  const double end = get_seconds();
-  return(end - start);
-}
-#endif
-
-// ------------------------------------------------------- //
-// Function: main
-// ------------------------------------------------------- //
-int main(int argc, char* argv[]) {
-
-  #ifdef USE_MPI
-  MPI_Init_thread( &argc, &argv, MPI_THREAD_FUNNELED, &mpi_thread );
-  MPI_Comm_size( MPI_COMM_WORLD, &mpi_size );
-  MPI_Comm_rank( MPI_COMM_WORLD, &mpi_rank );
-  #endif
-  
+int main(int argc, char *argv[]) {
+  // Default parameters
   int N = 4096;
   int repeats = 100;
+  double alpha = 1.0;
+  double beta = 1.0;
+  char prec = 'D';
 
-  gemm_t alpha = 1.0;
-  gemm_t beta  = 1.0;
-
-  // argv[1] is the matrix size
+  // Initialize MPI
+  MPI_Init(&argc, &argv);
+  int mpi_rank, mpi_size;
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+  
+  // Arguments Parsing
   if (argc > 1) {
     N = atoi(argv[1]);
-    mprintf("Matrix size input by command line: %d\n", N);
+    if (mpi_rank == 0) printf("Matrix size: %d\n", N);
+  } else if (mpi_rank == 0) printf("Matrix size defaulted to %d\n", N);
 
-    // argv[2] is the number of trials
-    if (argc > 2) {
-      repeats = atoi(argv[2]);
-      mprintf("Repeat multiply %d times.\n", repeats);
+  if (argc > 2) {
+    repeats = atoi(argv[2]);
+    if (mpi_rank == 0) printf("Repeat multiply %d times\n", repeats);
+  } else if (mpi_rank == 0) printf("Repeat multiply defaulted to %d\n", repeats);
 
-      // argv[3] is alpha
-      if (argc > 3) {
-        alpha = (gemm_t) atof(argv[3]);
+  if (argc > 3) alpha = atof(argv[3]);
+  if (mpi_rank == 0) printf("Alpha = %f\n", alpha);
 
-        // argv[4] is beta
-        if (argc > 4) {
-          beta = (gemm_t) atof(argv[4]);
-        }
-      }
-    } else {
-      mprintf("Repeat multiply defaulted to %d\n", repeats);
-    }
-  } else {
-    mprintf("Matrix size defaulted to %d\n", N);
-  }
+  if (argc > 4) beta = atof(argv[4]);
+  if (mpi_rank == 0) printf("Beta = %f\n", beta);
 
-
-#if (PRECISION==3)
-  mprintf("Alpha =    %f\n", __half2float(alpha));
-  mprintf("Beta  =    %f\n", __half2float(beta));
-#else
-  mprintf("Alpha =    %f\n", alpha);
-  mprintf("Beta  =    %f\n", beta);
-#endif
-
-  mprintf("Allocating Matrices...\n");
-
-  gemm_t* __restrict__ matrixA = (gemm_t*) malloc(sizeof(gemm_t) * N * N);
-  gemm_t* __restrict__ matrixB = (gemm_t*) malloc(sizeof(gemm_t) * N * N);
-  gemm_t* __restrict__ matrixC = (gemm_t*) malloc(sizeof(gemm_t) * N * N);
-
-  mprintf("Allocation complete, populating with values...\n");
-
-  #pragma omp parallel for
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      //matrixA[i*N + j] = 2.0;
-      //matrixB[i*N + j] = 0.5;
-      //matrixC[i*N + j] = 1.0;
-      matrixA[i*N + j] = 0.0;
-      matrixB[i*N + j] = 0.0;
-      matrixC[i*N + j] = 0.0;     
-      //matrixA[i*N + j] = rand(); //2.0;
-      //matrixB[i*N + j] = rand(); //0.5;
-      //matrixC[i*N + j] = rand(); //1.0;   
-#if (USE_RANDOM==1)
-      matrixA[i*N + j] = -1.0 + (2.0*( (double)(rand()) / (double)(RAND_MAX) ));   
-      matrixB[i*N + j] = -1.0 + (2.0*( (double)(rand()) / (double)(RAND_MAX) ));   
-      matrixC[i*N + j] = -1.0 + (2.0*( (double)(rand()) / (double)(RAND_MAX) ));  
-  #endif
-
-    }
-  }
-
-  mprintf("Performing multiplication...\n");
-
-  const double time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
-
-  //mprintf("Calculating matrix check...\n");
-
-  double final_sum = 0;
-  long long int count     = 0;
-  #pragma omp parallel for reduction(+:final_sum, count)
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      //final_sum += matrixC[i*N + j];
-      //printf("matrixC[i*N + j] %f \n",__half2float(matrixC[i*N + j]));
-      count++;
-    }
-  }
-
-  // Print results
-  mprintf("\n");
-  mprintf("===============================================================\n");
-
-  double N_dbl = (double) N;
-  double matrix_memory = (3 * N_dbl * N_dbl) * ((double) sizeof(gemm_t));
-  const double count_dbl = (double) count;
-  const double scaled_result = (final_sum / (count_dbl * repeats));
-/*
-  mprintf("Final Sum is:         %f\n", scaled_result);
-
-  const double check_sum = N_dbl + (1.0 / (double) (repeats));
-  const double allowed_margin = 1.0e-8;
-
-  if ( (check_sum >= (scaled_result - allowed_margin)) &&
-       (check_sum <= (scaled_result + allowed_margin)) ) {
-    mprintf(" -> Solution check PASSED successfully.\n");
-  } else {
-    mprintf(" -> Solution check FAILED.\n");
-  }
-*/
-  mprintf("Memory for Matrices:  %f MB\n", (matrix_memory / (1024 * 1024)));
-
-  mprintf("Multiply time:        %f seconds\n", time_taken);
-
-  const double flops_computed = ( (N_dbl * N_dbl * N_dbl * 2.0 * (double)(repeats)) +
-				  (N_dbl * N_dbl * 3 * (double)(repeats)) ) * (double)(mpi_size);
-
-  //mprintf("FLOPs computed:       %f\n", flops_computed);
-  mprintf("GFLOP/s rate:         %f GF/s\n", (flops_computed / time_taken) / 1.0e9);
-
-  mprintf("===============================================================\n");
-  mprintf("\n");
-
-  free(matrixA);
-  free(matrixB);
-  free(matrixC);
-
-  #ifdef USE_MPI
-  MPI_Finalize();
-  #endif
+  if (argc > 5) {
+    if (argv[5][0] == 'S') prec = 'S';
+    else if (argv[5][0] == 'D') prec = 'D';
+    else if (argv[5][0] == 'H') prec = 'H';
+    else if (mpi_rank == 0) printf("Precision '%s' not recognized, using default '%c'\n", argv[5], prec);
+  } else if (mpi_rank == 0) printf("Precision defaulted to %c\n", prec);
+  if (mpi_rank == 0) printf("Precision = %c\n", prec);
   
+  // Check number of MPI processes
+  if (mpi_size != NUM_NODE_GPUS) {
+    if (mpi_rank == 0)
+    std::cerr << "This program assumes "<< NUM_NODE_GPUS <<" MPI processes" << std::endl;
+    MPI_Finalize();
+    return 1;
+  } 
+  std::cout << "I am rank " << mpi_rank << " of " << mpi_size << std::endl;
+  
+  // Check number of available GPUs
+  int num_gpus;
+  cudaError_t err = cudaGetDeviceCount(&num_gpus);
+  if (err != cudaSuccess || num_gpus == 0) {
+    std::cerr << "Rank " << mpi_rank << ": No CUDA-capable devices found: " << cudaGetErrorString(err) << std::endl;
+    MPI_Finalize();
+    return 1;
+  }
+  std::cout << "Rank " << mpi_rank << ": Detected " << num_gpus << " GPUs" << std::endl;
+  
+  // Set GPU device based on rank
+  err = cudaSetDevice(mpi_rank);
+  if (err != cudaSuccess) {
+    std::cerr << "Rank " << mpi_rank << ": cudaSetDevice failed: " << cudaGetErrorString(err) << std::endl;
+    MPI_Finalize();
+    return 1;
+  }
+  std::cout << "Rank " << mpi_rank << ": cudaSetDevice sucessfully" << std::endl;
+
+  // Compute local size
+  int local_N = N / mpi_size;
+  if (local_N * mpi_size != N) {
+    if (mpi_rank == 0) printf("N must be divisible by %d\n", mpi_size);
+    MPI_Finalize();
+    return 1;
+  }
+
+  double time_taken;
+  int sizeof_gemm_t;
+
+  switch (prec) {
+    case 'S': {
+      float *full_A_host = nullptr, *full_B_host = nullptr, *full_C_host = nullptr;
+      float *local_A_host, *local_C_host, *B_host;
+      float *local_A_gpu, *local_B_gpu, *local_C_gpu;
+
+      // Allocate local host buffers
+      local_A_host = (float *)malloc(sizeof(float) * local_N * N);
+      local_C_host = (float *)malloc(sizeof(float) * local_N * N);
+      B_host = (float *)malloc(sizeof(float) * N * N);
+      
+      // Rank 0 allocates and initializes full matrices
+      if (mpi_rank == 0) {
+        alloc_gemm(N, &full_A_host, &full_B_host, &full_C_host);
+      }
+
+      // Distribute data
+      MPI_Scatter(full_A_host, local_N * N, MPI_FLOAT, local_A_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_host, local_N * N, MPI_FLOAT, local_C_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_host, N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+      // Allocate GPU memory
+      cudaMalloc(&local_A_gpu, sizeof(float) * local_N * N);
+      cudaMalloc(&local_C_gpu, sizeof(float) * local_N * N);
+      cudaMalloc(&local_B_gpu, sizeof(float) * N * N);
+
+      // Transfer to GPU
+      cudaMemcpy(local_A_gpu, local_A_host, sizeof(float) * local_N * N, cudaMemcpyHostToDevice);
+      cudaMemcpy(local_C_gpu, local_C_host, sizeof(float) * local_N * N, cudaMemcpyHostToDevice);
+      cudaMemcpy(local_B_gpu, B_host, sizeof(float) * N * N, cudaMemcpyHostToDevice);
+
+      // Perform computation
+      time_taken = calc_gemm(repeats, local_N, N, N, alpha, beta, local_A_gpu, local_B_gpu, local_C_gpu);
+
+      // Transfer result back to host
+      cudaMemcpy(local_C_host, local_C_gpu, sizeof(float) * local_N * N, cudaMemcpyDeviceToHost);
+
+      // Gather results on rank 0
+      if (mpi_rank == 0) {
+        MPI_Gather(local_C_host, local_N * N, MPI_FLOAT, full_C_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, full_B_host, full_C_host);
+      } else {
+        MPI_Gather(local_C_host, local_N * N, MPI_FLOAT, nullptr, 0, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      }
+
+      // Cleanup
+      free(local_A_host);
+      free(local_C_host);
+      free(B_host);
+      cudaFree(local_A_gpu);
+      cudaFree(local_B_gpu);
+      cudaFree(local_C_gpu);
+      if (mpi_rank == 0) {
+        free_gemm(full_A_host, full_B_host, full_C_host);
+      }
+      sizeof_gemm_t = sizeof(float);
+      break;
+    }
+    case 'D': {
+      double *full_A_host = nullptr, *full_B_host = nullptr, *full_C_host = nullptr;
+      double *local_A_host, *local_C_host, *B_host;
+      double *local_A_gpu, *local_B_gpu, *local_C_gpu;
+
+      if (mpi_rank == 0) {
+        alloc_gemm(N, &full_A_host, &full_B_host, &full_C_host);
+      }
+
+      local_A_host = (double *)malloc(sizeof(double) * local_N * N);
+      local_C_host = (double *)malloc(sizeof(double) * local_N * N);
+      B_host = (double *)malloc(sizeof(double) * N * N);
+
+      MPI_Scatter(full_A_host, local_N * N, MPI_DOUBLE, local_A_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_host, local_N * N, MPI_DOUBLE, local_C_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_host, N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+      cudaMalloc(&local_A_gpu, sizeof(double) * local_N * N);
+      cudaMalloc(&local_C_gpu, sizeof(double) * local_N * N);
+      cudaMalloc(&local_B_gpu, sizeof(double) * N * N);
+
+      cudaMemcpy(local_A_gpu, local_A_host, sizeof(double) * local_N * N, cudaMemcpyHostToDevice);
+      cudaMemcpy(local_C_gpu, local_C_host, sizeof(double) * local_N * N, cudaMemcpyHostToDevice);
+      cudaMemcpy(local_B_gpu, B_host, sizeof(double) * N * N, cudaMemcpyHostToDevice);
+
+      time_taken = calc_gemm(repeats, local_N, N, N, alpha, beta, local_A_gpu, local_B_gpu, local_C_gpu);
+
+      cudaMemcpy(local_C_host, local_C_gpu, sizeof(double) * local_N * N, cudaMemcpyDeviceToHost);
+
+      if (mpi_rank == 0) {
+        MPI_Gather(local_C_host, local_N * N, MPI_DOUBLE, full_C_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, full_B_host, full_C_host);
+      } else {
+        MPI_Gather(local_C_host, local_N * N, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      }
+
+      free(local_A_host);
+      free(local_C_host);
+      free(B_host);
+      cudaFree(local_A_gpu);
+      cudaFree(local_B_gpu);
+      cudaFree(local_C_gpu);
+      if (mpi_rank == 0) {
+        free_gemm(full_A_host, full_B_host, full_C_host);
+      }
+      sizeof_gemm_t = sizeof(double);
+      break;
+    }
+    case 'H': {
+      __half *full_A_host = nullptr, *full_B_host = nullptr, *full_C_host = nullptr;
+      __half *local_A_host, *local_C_host, *B_host;
+      __half *local_A_gpu, *local_B_gpu, *local_C_gpu;
+
+      if (mpi_rank == 0) {
+        alloc_gemm(N, &full_A_host, &full_B_host, &full_C_host);
+      }
+
+      local_A_host = (__half *)malloc(sizeof(__half) * local_N * N);
+      local_C_host = (__half *)malloc(sizeof(__half) * local_N * N);
+      B_host = (__half *)malloc(sizeof(__half) * N * N);
+
+      int byte_count = local_N * N * sizeof(__half);
+      MPI_Scatter(full_A_host, byte_count, MPI_BYTE, local_A_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_host, byte_count, MPI_BYTE, local_C_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_host, N * N * sizeof(__half), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+      cudaMalloc(&local_A_gpu, sizeof(__half) * local_N * N);
+      cudaMalloc(&local_C_gpu, sizeof(__half) * local_N * N);
+      cudaMalloc(&local_B_gpu, sizeof(__half) * N * N);
+
+      cudaMemcpy(local_A_gpu, local_A_host, sizeof(__half) * local_N * N, cudaMemcpyHostToDevice);
+      cudaMemcpy(local_C_gpu, local_C_host, sizeof(__half) * local_N * N, cudaMemcpyHostToDevice);
+      cudaMemcpy(local_B_gpu, B_host, sizeof(__half) * N * N, cudaMemcpyHostToDevice);
+
+      time_taken = calc_gemm(repeats, local_N, N, N, alpha, beta, local_A_gpu, local_B_gpu, local_C_gpu);
+
+      cudaMemcpy(local_C_host, local_C_gpu, sizeof(__half) * local_N * N, cudaMemcpyDeviceToHost);
+
+      if (mpi_rank == 0) {
+        MPI_Gather(local_C_host, byte_count, MPI_BYTE, full_C_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, full_B_host, full_C_host);
+      } else {
+        MPI_Gather(local_C_host, byte_count, MPI_BYTE, nullptr, 0, MPI_BYTE, 0, MPI_COMM_WORLD);
+      }
+
+      free(local_A_host);
+      free(local_C_host);
+      free(B_host);
+      cudaFree(local_A_gpu);
+      cudaFree(local_B_gpu);
+      cudaFree(local_C_gpu);
+      if (mpi_rank == 0) {
+        free_gemm(full_A_host, full_B_host, full_C_host);
+      }
+      sizeof_gemm_t = sizeof(__half);
+      break;
+    }
+    default:
+      if (mpi_rank == 0) printf("Invalid precision\n");
+      MPI_Finalize();
+      return 1;
+  }
+
+  // Compute maximum time across all ranks
+  double max_time;
+  MPI_Reduce(&time_taken, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+  // Output results on rank 0
+  if (mpi_rank == 0) {
+    printf("\n===============================================================\n");
+    double N_dbl = (double)N;
+    double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
+    printf("Memory for Matrices: %f MB\n", matrix_memory / (1024 * 1024));
+    printf("Multiply time: %f seconds\n", max_time);
+    const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
+    printf("GFLOP/s rate: %f GF/s\n", (flops_computed / max_time) / 1.0e9);
+    printf("===============================================================\n\n");
+  }
+
+  MPI_Finalize();
   return 0;
 }
