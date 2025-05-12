@@ -1,4 +1,3 @@
-
 #if (PRECISION == 'S')
 #define gemm_t float
 #define gemm_f cublasSgemm

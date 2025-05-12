@@ -1,5 +1,7 @@
 #include <stdio.h>
-#include <stdlib.h>
+#include <iostream>
+#include <cstdlib>
+#include <chrono>
 #include <sys/time.h>
 
 #include <cuda_runtime.h>
