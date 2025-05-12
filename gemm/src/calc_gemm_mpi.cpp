@@ -107,44 +107,63 @@ calc_gemm(int rank, int repeats, int M, int N, int K, double dalpha, double dbet
   gemm_t alpha = (gemm_t)dalpha;
   gemm_t beta = (gemm_t)dbeta;
 
+  cudaError_t  errorC;
+  gemm_t *d_matrixC;
+  errorC = cudaMalloc((void **)&d_matrixC, M * N * sizeof(gemm_t));
+  if (errorC != cudaSuccess) {
+    printf("ERROR: allocating device matrices\n");
+    exit(1);
+  }
+
   cublasHandle_t handle;
   cublasStatus_t status = cublasCreate(&handle);
   if (status != CUBLAS_STATUS_SUCCESS) {
     printf("ERROR: creating cublas handle\n");
+    MPI_Finalize();
     exit(1);
   }
   status = cublasSetMathMode(handle, cumode);
   if (status != CUBLAS_STATUS_SUCCESS) {
     printf("ERROR: setting math mode\n");
+    MPI_Finalize();
     exit(1);
   }
 
-  // For row-major matrices, adjust gemm call with transpose operations
-  // C_rowmajor (M x N) = alpha * A_rowmajor (M x K) * B_rowmajor (K x N) + beta * C_rowmajor
-  // Compute C^T = alpha * B^T * A^T + beta * C^T in column-major
-  const double start = get_seconds();
+  cublasStatus_t statusC;
+  statusC = cublasSetMatrix(M, N, sizeof(gemm_t), d_C, M, d_matrixC, M);
+  if (statusC != CUBLAS_STATUS_SUCCESS) {
+    printf("ERROR: intializing device matrices\n");
+    exit(1);
+  }
+
+  Timer timer;
+  timer.record_start();
   for (int r = 0; r < repeats; r++) {
     cublasStatus_t matmulStatus = gemm_f(handle,
-                                         CUBLAS_OP_T,   // op(B) = B^T
-                                         CUBLAS_OP_T,   // op(A) = A^T
-                                         N,             // m = N (rows of C^T)
-                                         M,             // n = M (cols of C^T)
-                                         K,             // k = K
+                                         CUBLAS_OP_N,
+                                         CUBLAS_OP_N,
+                                         M,
+                                         N,
+                                         K,
                                          &alpha,
-                                         d_B, N,        // B_rowmajor (K x N), ldB = N
-                                         d_A, K,        // A_rowmajor (M x K), ldA = K
+                                         d_A, M,
+                                         d_B, N,
                                          &beta,
-                                         d_C, N);       // C_rowmajor (M x N), ldC = N
+                                         d_matrixC, M);
     if (matmulStatus != CUBLAS_STATUS_SUCCESS) {
       printf("MatMul failed with error %d\n", matmulStatus);
+      MPI_Finalize();
       exit(1);
     }
   }
   cudaDeviceSynchronize();
-  const double end = get_seconds();
 
+  cublasGetMatrix(M, N, sizeof(gemm_t), d_matrixC, M, d_C, M);
+  timer.record_stop();
+
+  cudaFree(d_matrixC);
   cublasDestroy(handle);
-  return (end - start);
+  return timer.elapsed();
 }
 
 #undef gemm_t
