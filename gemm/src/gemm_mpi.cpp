@@ -31,6 +31,39 @@ double get_seconds() {
   return seconds + (usec * 1.0e-6);
 }
 
+struct Timer {
+#ifdef TIMING_CUDA_EVENTS
+    cudaEvent_t start, stop;
+
+    Timer() {
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+    }
+
+    ~Timer() {
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+
+    void record_start() { cudaEventRecord(start); }
+    void record_stop() { cudaEventRecord(stop); }
+    double elapsed() {
+        cudaEventSynchronize(stop);
+        float ms;
+        cudaEventElapsedTime(&ms, start, stop);
+        return ms / 1000.0;
+    }
+#else
+    std::chrono::time_point<std::chrono::high_resolution_clock> start, stop;
+
+    void record_start() { start = std::chrono::high_resolution_clock::now(); }
+    void record_stop() { stop = std::chrono::high_resolution_clock::now(); }
+    double elapsed() {
+        return std::chrono::duration<double>(stop - start).count();
+    }
+#endif
+};
+
 #define PRECISION 'S'
 #include "calc_gemm_mpi.cpp"
 #undef PRECISION
@@ -121,157 +154,287 @@ int main(int argc, char *argv[]) {
   double time_taken;
   int sizeof_gemm_t;
 
+  Timer timer;
+  double mpi_scatter_time;
+  double mpi_gather_time;
+
   switch (prec) {
     case 'S': {
-      float *full_A_host = nullptr, *full_B_host = nullptr, *full_C_host = nullptr;
-      float *local_A_host, *local_C_host, *B_host;
-      float *local_A_gpu, *local_B_gpu, *local_C_gpu;
-
-      // Allocate local host buffers
-      local_A_host = (float *)malloc(sizeof(float) * local_N * N);
-      local_C_host = (float *)malloc(sizeof(float) * local_N * N);
-      B_host = (float *)malloc(sizeof(float) * N * N);
+      // Full A, B, C matrics on host of rank 0 MPI process
+      float *full_A_host = nullptr, *B_host = nullptr, *full_C_host = nullptr;
+      // Full A, B, C matrics on gpu of rank 0 MPI process
+      float *full_A_gpu, *B_gpu, *full_C_gpu;      
+      // A, C matrics on GPU of each MPI process
+      float *local_A_gpu, *local_C_gpu;
       
-      // Rank 0 allocates and initializes full matrices
+      // Rank 0 allocates and initializes full matrices on host using cudaMallocHost
       if (mpi_rank == 0) {
-        alloc_gemm(N, &full_A_host, &full_B_host, &full_C_host);
+        alloc_gemm_host(N, &full_A_host, &B_host, &full_C_host);
+        alloc_gemm_gpu(mpi_rank, N, N, &full_A_gpu, &B_gpu, &full_C_gpu);
+        
+        // Copy from host to GPU        
+        cudaError_t cudaErr;
+        cudaErr = cudaMemcpy(full_A_gpu, full_A_host, N * N * sizeof(float), cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_A_host to local_A_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaMemcpy(B_gpu, B_host, N * N * sizeof(float), cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_B_host to local_B_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaMemcpy(full_C_gpu, full_C_host, N * N * sizeof(float), cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_C_host to local_C_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaDeviceSynchronize();
+        if (cudaErr != cudaSuccess) {
+            printf("Rank 0: cudaDeviceSynchronize failed: %s\n", cudaGetErrorString(cudaErr));
+            MPI_Finalize();
+            return 1;
+        }
+        
+        cudaErr = cudaMalloc(&local_A_gpu, local_N * N * sizeof(float));
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMalloc local_A_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          exit(1);
+        }
+        cudaErr = cudaMalloc(&local_C_gpu, local_N * N * sizeof(float));
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMalloc local_C_gpu: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          exit(1);
+        }
+      } else {
+        // Allocate Memory on GPU of each MPI process
+        alloc_gemm_gpu(mpi_rank, local_N, N, &local_A_gpu, &B_gpu, &local_C_gpu);
       }
 
+      //timer.record_start();
       // Distribute data
-      MPI_Scatter(full_A_host, local_N * N, MPI_FLOAT, local_A_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
-      MPI_Scatter(full_C_host, local_N * N, MPI_FLOAT, local_C_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
-      MPI_Bcast(B_host, N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
-
-      // Allocate GPU memory
-      cudaMalloc(&local_A_gpu, sizeof(float) * local_N * N);
-      cudaMalloc(&local_C_gpu, sizeof(float) * local_N * N);
-      cudaMalloc(&local_B_gpu, sizeof(float) * N * N);
-
-      // Transfer to GPU
-      cudaMemcpy(local_A_gpu, local_A_host, sizeof(float) * local_N * N, cudaMemcpyHostToDevice);
-      cudaMemcpy(local_C_gpu, local_C_host, sizeof(float) * local_N * N, cudaMemcpyHostToDevice);
-      cudaMemcpy(local_B_gpu, B_host, sizeof(float) * N * N, cudaMemcpyHostToDevice);
+      MPI_Scatter(full_A_gpu, local_N * N, MPI_FLOAT, local_A_gpu, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_gpu, local_N * N, MPI_FLOAT, local_C_gpu, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_gpu, N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      //timer.record_stop();
+      //mpi_scatter_time = timer.elapsed();
 
       // Perform computation
-      time_taken = calc_gemm(repeats, local_N, N, N, alpha, beta, local_A_gpu, local_B_gpu, local_C_gpu);
-
-      // Transfer result back to host
-      cudaMemcpy(local_C_host, local_C_gpu, sizeof(float) * local_N * N, cudaMemcpyDeviceToHost);
-
+      time_taken = calc_gemm(mpi_rank, repeats, local_N, N, N, alpha, beta, local_A_gpu, B_gpu, local_C_gpu);
+      
+      //timer.record_start();
       // Gather results on rank 0
       if (mpi_rank == 0) {
-        MPI_Gather(local_C_host, local_N * N, MPI_FLOAT, full_C_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
-        check_gemm(N, full_A_host, full_B_host, full_C_host);
+        MPI_Gather(local_C_gpu, local_N * N, MPI_FLOAT, full_C_host, local_N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, B_host, full_C_host);
       } else {
-        MPI_Gather(local_C_host, local_N * N, MPI_FLOAT, nullptr, 0, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Gather(local_C_gpu, local_N * N, MPI_FLOAT, nullptr, 0, MPI_FLOAT, 0, MPI_COMM_WORLD);
       }
+      //timer.record_stop();
+      //mpi_gather_time = timer.elapsed();
 
       // Cleanup
-      free(local_A_host);
-      free(local_C_host);
-      free(B_host);
       cudaFree(local_A_gpu);
-      cudaFree(local_B_gpu);
+      cudaFree(B_gpu);
       cudaFree(local_C_gpu);
       if (mpi_rank == 0) {
-        free_gemm(full_A_host, full_B_host, full_C_host);
+        cudaFreeHost(full_A_host);
+        cudaFreeHost(B_host);
+        cudaFreeHost(full_C_host);
+        cudaFree(full_A_gpu);
+        cudaFree(full_C_gpu);
       }
       sizeof_gemm_t = sizeof(float);
       break;
     }
     case 'D': {
-      double *full_A_host = nullptr, *full_B_host = nullptr, *full_C_host = nullptr;
-      double *local_A_host, *local_C_host, *B_host;
-      double *local_A_gpu, *local_B_gpu, *local_C_gpu;
-
+      // Full A, B, C matrics on host of rank 0 MPI process
+      double *full_A_host = nullptr, *B_host = nullptr, *full_C_host = nullptr;
+      // Full A, B, C matrics on gpu of rank 0 MPI process
+      double *full_A_gpu, *B_gpu, *full_C_gpu;      
+      // A, C matrics on GPU of each MPI process
+      double *local_A_gpu, *local_C_gpu;
+      
+      // Rank 0 allocates and initializes full matrices on host using cudaMallocHost
       if (mpi_rank == 0) {
-        alloc_gemm(N, &full_A_host, &full_B_host, &full_C_host);
-      }
+        alloc_gemm_host(N, &full_A_host, &B_host, &full_C_host);
+        alloc_gemm_gpu(mpi_rank, N, N, &full_A_gpu, &B_gpu, &full_C_gpu);
+        
+        // Copy from host to GPU        
+        cudaError_t cudaErr;
+        cudaErr = cudaMemcpy(full_A_gpu, full_A_host, N * N * sizeof(double), cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_A_host to local_A_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaMemcpy(B_gpu, B_host, N * N * sizeof(double), cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_B_host to local_B_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaMemcpy(full_C_gpu, full_C_host, N * N * sizeof(double), cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_C_host to local_C_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaDeviceSynchronize();
+        if (cudaErr != cudaSuccess) {
+            printf("Rank 0: cudaDeviceSynchronize failed: %s\n", cudaGetErrorString(cudaErr));
+            MPI_Finalize();
+            return 1;
+        }
 
-      local_A_host = (double *)malloc(sizeof(double) * local_N * N);
-      local_C_host = (double *)malloc(sizeof(double) * local_N * N);
-      B_host = (double *)malloc(sizeof(double) * N * N);
-
-      MPI_Scatter(full_A_host, local_N * N, MPI_DOUBLE, local_A_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-      MPI_Scatter(full_C_host, local_N * N, MPI_DOUBLE, local_C_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-      MPI_Bcast(B_host, N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-      cudaMalloc(&local_A_gpu, sizeof(double) * local_N * N);
-      cudaMalloc(&local_C_gpu, sizeof(double) * local_N * N);
-      cudaMalloc(&local_B_gpu, sizeof(double) * N * N);
-
-      cudaMemcpy(local_A_gpu, local_A_host, sizeof(double) * local_N * N, cudaMemcpyHostToDevice);
-      cudaMemcpy(local_C_gpu, local_C_host, sizeof(double) * local_N * N, cudaMemcpyHostToDevice);
-      cudaMemcpy(local_B_gpu, B_host, sizeof(double) * N * N, cudaMemcpyHostToDevice);
-
-      time_taken = calc_gemm(repeats, local_N, N, N, alpha, beta, local_A_gpu, local_B_gpu, local_C_gpu);
-
-      cudaMemcpy(local_C_host, local_C_gpu, sizeof(double) * local_N * N, cudaMemcpyDeviceToHost);
-
-      if (mpi_rank == 0) {
-        MPI_Gather(local_C_host, local_N * N, MPI_DOUBLE, full_C_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-        check_gemm(N, full_A_host, full_B_host, full_C_host);
+        cudaErr = cudaMalloc(&local_A_gpu, local_N * N * sizeof(double));
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMalloc local_A_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          exit(1);
+        }
+        cudaErr = cudaMalloc(&local_C_gpu, local_N * N * sizeof(double));
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMalloc local_C_gpu: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          exit(1);
+        }
       } else {
-        MPI_Gather(local_C_host, local_N * N, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        // Allocate Memory on GPU of each MPI process
+        alloc_gemm_gpu(mpi_rank, local_N, N, &local_A_gpu, &B_gpu, &local_C_gpu);
       }
+            
+      //timer.record_start();
+      // Distribute data
+      MPI_Scatter(full_A_gpu, local_N * N, MPI_DOUBLE, local_A_gpu, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_gpu, local_N * N, MPI_DOUBLE, local_C_gpu, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_gpu, N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      //timer.record_stop();
+      //mpi_scatter_time = timer.elapsed();
 
-      free(local_A_host);
-      free(local_C_host);
-      free(B_host);
+      // Perform computation
+      time_taken = calc_gemm(mpi_rank, repeats, local_N, N, N, alpha, beta, local_A_gpu, B_gpu, local_C_gpu);
+
+      //timer.record_start();
+      // Gather results on rank 0
+      if (mpi_rank == 0) {
+        MPI_Gather(local_C_gpu, local_N * N, MPI_DOUBLE, full_C_host, local_N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, B_host, full_C_host);
+      } else {
+        MPI_Gather(local_C_gpu, local_N * N, MPI_DOUBLE, nullptr, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      }
+      //timer.record_stop();
+      //mpi_gather_time = timer.elapsed();
+
+      // Cleanup
       cudaFree(local_A_gpu);
-      cudaFree(local_B_gpu);
+      cudaFree(B_gpu);
       cudaFree(local_C_gpu);
       if (mpi_rank == 0) {
-        free_gemm(full_A_host, full_B_host, full_C_host);
+        cudaFreeHost(full_A_host);
+        cudaFreeHost(B_host);
+        cudaFreeHost(full_C_host);
+        cudaFree(full_A_gpu);
+        cudaFree(full_C_gpu);
       }
       sizeof_gemm_t = sizeof(double);
       break;
     }
     case 'H': {
-      __half *full_A_host = nullptr, *full_B_host = nullptr, *full_C_host = nullptr;
-      __half *local_A_host, *local_C_host, *B_host;
-      __half *local_A_gpu, *local_B_gpu, *local_C_gpu;
-
+      // Full A, B, C matrics on host of rank 0 MPI process
+      __half *full_A_host = nullptr, *B_host = nullptr, *full_C_host = nullptr;
+      // Full A, B, C matrics on gpu of rank 0 MPI process
+      __half *full_A_gpu, *B_gpu, *full_C_gpu;      
+      // A, C matrics on GPU of each MPI process
+      __half *local_A_gpu, *local_C_gpu;
+      
+      // Rank 0 allocates and initializes full matrices on host using cudaMallocHost
       if (mpi_rank == 0) {
-        alloc_gemm(N, &full_A_host, &full_B_host, &full_C_host);
-      }
-
-      local_A_host = (__half *)malloc(sizeof(__half) * local_N * N);
-      local_C_host = (__half *)malloc(sizeof(__half) * local_N * N);
-      B_host = (__half *)malloc(sizeof(__half) * N * N);
-
-      int byte_count = local_N * N * sizeof(__half);
-      MPI_Scatter(full_A_host, byte_count, MPI_BYTE, local_A_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
-      MPI_Scatter(full_C_host, byte_count, MPI_BYTE, local_C_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
-      MPI_Bcast(B_host, N * N * sizeof(__half), MPI_BYTE, 0, MPI_COMM_WORLD);
-
-      cudaMalloc(&local_A_gpu, sizeof(__half) * local_N * N);
-      cudaMalloc(&local_C_gpu, sizeof(__half) * local_N * N);
-      cudaMalloc(&local_B_gpu, sizeof(__half) * N * N);
-
-      cudaMemcpy(local_A_gpu, local_A_host, sizeof(__half) * local_N * N, cudaMemcpyHostToDevice);
-      cudaMemcpy(local_C_gpu, local_C_host, sizeof(__half) * local_N * N, cudaMemcpyHostToDevice);
-      cudaMemcpy(local_B_gpu, B_host, sizeof(__half) * N * N, cudaMemcpyHostToDevice);
-
-      time_taken = calc_gemm(repeats, local_N, N, N, alpha, beta, local_A_gpu, local_B_gpu, local_C_gpu);
-
-      cudaMemcpy(local_C_host, local_C_gpu, sizeof(__half) * local_N * N, cudaMemcpyDeviceToHost);
-
-      if (mpi_rank == 0) {
-        MPI_Gather(local_C_host, byte_count, MPI_BYTE, full_C_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
-        check_gemm(N, full_A_host, full_B_host, full_C_host);
+        alloc_gemm_host(N, &full_A_host, &B_host, &full_C_host);
+        alloc_gemm_gpu(mpi_rank, N, N, &full_A_gpu, &B_gpu, &full_C_gpu);
+        
+        // Copy from host to GPU        
+        cudaError_t cudaErr;
+        cudaErr = cudaMemcpy(full_A_gpu, full_A_host, sizeof(__half) * N * N, cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_A_host to local_A_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaMemcpy(B_gpu, B_host, sizeof(__half) * N * N, cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_B_host to local_B_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaMemcpy(full_C_gpu, full_C_host, sizeof(__half) * N * N, cudaMemcpyHostToDevice);
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMemcpy full_C_host to local_C_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          return 1;
+        }
+        cudaErr = cudaDeviceSynchronize();
+        if (cudaErr != cudaSuccess) {
+            printf("Rank 0: cudaDeviceSynchronize failed: %s\n", cudaGetErrorString(cudaErr));
+            MPI_Finalize();
+            return 1;
+        }
+        
+        cudaErr = cudaMalloc(&local_A_gpu, local_N * N * sizeof(__half));
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMalloc local_A_gpu failed: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          exit(1);
+        }
+        cudaErr = cudaMalloc(&local_C_gpu, local_N * N * sizeof(__half));
+        if (cudaErr != cudaSuccess) {
+          printf("Rank 0: cudaMalloc local_C_gpu: %s\n", cudaGetErrorString(cudaErr));
+          MPI_Finalize();
+          exit(1);
+        }
       } else {
-        MPI_Gather(local_C_host, byte_count, MPI_BYTE, nullptr, 0, MPI_BYTE, 0, MPI_COMM_WORLD);
+        // Allocate Memory on GPU of each MPI process
+        alloc_gemm_gpu(mpi_rank, local_N, N, &local_A_gpu, &B_gpu, &local_C_gpu);
       }
+      
+      //timer.record_start();
+      // Distribute data
+      int byte_count = local_N * N * sizeof(__half);
+      MPI_Scatter(full_A_gpu, byte_count, MPI_BYTE, local_A_gpu, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_gpu, byte_count, MPI_BYTE, local_C_gpu, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_gpu, N * N * sizeof(__half), MPI_BYTE, 0, MPI_COMM_WORLD);
+      //timer.record_stop();
+      //mpi_scatter_time = timer.elapsed();
 
-      free(local_A_host);
-      free(local_C_host);
-      free(B_host);
+      // Perform computation
+      time_taken = calc_gemm(mpi_rank, repeats, local_N, N, N, alpha, beta, local_A_gpu, B_gpu, local_C_gpu);
+
+      //timer.record_start();
+      // Gather results on rank 0
+      if (mpi_rank == 0) {
+        MPI_Gather(local_C_gpu, byte_count, MPI_BYTE, full_C_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, B_host, full_C_host);
+      } else {
+        MPI_Gather(local_C_gpu, byte_count, MPI_BYTE, nullptr, 0, MPI_BYTE, 0, MPI_COMM_WORLD);
+      }
+      //timer.record_stop();
+      //mpi_gather_time = timer.elapsed();
+
+      // Cleanup
       cudaFree(local_A_gpu);
-      cudaFree(local_B_gpu);
+      cudaFree(B_gpu);
       cudaFree(local_C_gpu);
       if (mpi_rank == 0) {
-        free_gemm(full_A_host, full_B_host, full_C_host);
+        cudaFreeHost(full_A_host);
+        cudaFreeHost(B_host);
+        cudaFreeHost(full_C_host);
+        cudaFree(full_A_gpu);
+        cudaFree(full_C_gpu);
       }
       sizeof_gemm_t = sizeof(__half);
       break;
@@ -283,8 +446,12 @@ int main(int argc, char *argv[]) {
   }
 
   // Compute maximum time across all ranks
-  double max_time;
-  MPI_Reduce(&time_taken, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  double max_time_compuation;
+  //double max_time_data_scatter;
+  //double max_time_data_gather;
+  MPI_Reduce(&time_taken, &max_time_compuation, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  //MPI_Reduce(&mpi_scatter_time, &max_time_data_scatter, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  //MPI_Reduce(&mpi_gather_time, &max_time_data_gather, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
   // Output results on rank 0
   if (mpi_rank == 0) {
@@ -292,9 +459,11 @@ int main(int argc, char *argv[]) {
     double N_dbl = (double)N;
     double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
     printf("Memory for Matrices: %f MB\n", matrix_memory / (1024 * 1024));
-    printf("Multiply time: %f seconds\n", max_time);
+    printf("Multiply time: %f seconds\n", max_time_compuation);
+    //printf("NVLink data scatter time: %f seconds\n", max_time_data_scatter);
+    //printf("NVLink data gather time: %f seconds\n", max_time_data_gather);
     const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
-    printf("GFLOP/s rate: %f GF/s\n", (flops_computed / max_time) / 1.0e9);
+    printf("GFLOP/s rate: %f GF/s\n", (flops_computed / max_time_compuation) / 1.0e9);
     printf("===============================================================\n\n");
   }
 
