@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
     // Check number of MPI processes
     if (mpi_size != NUM_NODE_GPUS) {
         if (mpi_rank == 0)
-            std::cerr << "This program assumes "<<  <<" MPI processes" << std::endl;
+            std::cerr << "This program assumes "<< NUM_NODE_GPUS <<" MPI processes" << std::endl;
         MPI_Finalize();
         return 1;
     } 
