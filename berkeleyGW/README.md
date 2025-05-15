@@ -39,7 +39,25 @@ First, we need to load the `nvhpc` module.
 module load nvhpc
 ```
 
-According to the offical [website](http://manual.berkeleygw.org/2.0/compilation), we may need to build and install some libraries such as HDF5, FFTW, and ScaLAPACK
+According to the offical [website](http://manual.berkeleygw.org/2.0/compilation), we may need to build and install some libraries such as HDF5, FFTW, ScaLAPACK, OpenMPI
+
+**OpenMPI**
+
+Downloading OpenMPI source codes from [github](https://www-lb.open-mpi.org/software/ompi), taking 4.1.6 as an example,
+
+```bash
+wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz
+
+tar -xvf openmpi-4.1.6
+
+cd 
+
+./configure --prefix=$HOME/local/openmpi
+
+make -j all
+
+make install
+```
 
 **HDF5**
 
