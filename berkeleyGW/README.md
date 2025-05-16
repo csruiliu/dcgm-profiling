@@ -33,11 +33,13 @@ Please use [lrc-arch-cpu.mk](lrc-arch-cpu.mk) for compilation.
 
 Compiling Berkeley on Lawrencium with GPU support can be challenging due to the module configuration on Lawrencium. It may require some third-party compilers and libraries, which are supported by the modules in Perlmutter. The following instructions have been validated.
 
-First, we need to load the `nvhpc` module.
+First, we want to see how `nvhpc` module set the environment variables, so that we could do the same except for OpenMPI.
 
 ```bash
-module load nvhpc
+module show nvhpc
 ```
+
+Then, copy the environment variables setting to `~/.bashrc` except for OpenMPI.
 
 According to the offical [website](http://manual.berkeleygw.org/2.0/compilation), we may need to build and install some libraries such as HDF5, FFTW, ScaLAPACK, OpenMPI
 
@@ -50,13 +52,24 @@ wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz
 
 tar -xvf openmpi-4.1.6
 
-cd 
+mv openmpi-4.1.6 openmpi-4.1.6-src
 
-./configure --prefix=$HOME/local/openmpi
+cd openmpi-4.1.6-src
+
+./configure --prefix=$HOME/local/openmpi-4.1.6 CFLAGS="-fPIC" CXXFLAGS="-fPIC" FFLAGS="-fPIC" FCFLAGS="-fPIC" --enable-mpi-cxx --enable-static
 
 make -j all
 
 make install
+
+#copy to $SCRATCH
+cp -r $HOME/local/openmpi-4.1.6 $SCRATCH/local
+
+# adding the following environmet variable to ~/.bashrc
+export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
+export PATH="$OPENMPI_DIR/bin:$PATH"
+export LD_LIBRARY_PATH="$OPENMPI_DIR/lib:$LD_LIBRARY_PATH"
+export CPATH="$OPENMPI_DIR/include:$CPATH"
 ```
 
 **HDF5**
@@ -68,20 +81,21 @@ wget https://github.com/HDFGroup/hdf5/releases/download/hdf5-1_14_3/hdf5-1_14_3.
 
 tar -xvf hdf5-1_14_3.tar.gz
 
-# rename the uncompressed fold
-mv <uncompressed-fold> fftw-3.3.10-src
-
-cd fftw-3.3.10-src
+cd <uncompressed-folder>
 
 # run ./configure --help for more details
+# rename the uncompressed folder if its name is hdf5-1.14.3
 ./configure --prefix=$HOME/local/hdf5-1.14.3 CC=mpicc FC=mpifort CFLAGS="-fPIC" FCFLAGS="-fpic" --enable-fortran --enable-shared --enable-parallel
 # run make as as many cores as possible
 make -j
 # install all files to prefix path, which is $HOME/local/hdf5-1.14.3
 make install 
 
+#copy to $SCRATCH
+cp -r $HOME/local/hdf5-1.14.3 $SCRATCH/local
+
 # adding the following environmet variable to ~/.bashrc
-export HDF5_DIR="$HOME/local/hdf5-1.14.3"
+export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3"
 export PATH="$HDF5_DIR/bin:$PATH"
 export LD_LIBRARY_PATH="$HDF5_DIR/lib:$LD_LIBRARY_PATH"
 export CPATH="$HDF5_DIR/include:$CPATH"
@@ -96,17 +110,22 @@ wget https://www.fftw.org/fftw-3.3.10.tar.gz
 
 tar -xvf fftw-3.3.10.tar.gz
 
-# rename the uncompressed fold
 mv fftw-3.3.10 fftw-3.3.10-src
 
+cd fftw-3.3.10-src
+
+# rename the uncompressed folder if its name is fftw-3.3.10
 ./configure --prefix=$HOME/local/fftw-3.3.10 CC=mpicc FC=mpifort --enable-shared --enable-openmp --enable-threads --enable-mpi
 
 make -j
 
 make install
 
+#copy to $SCRATCH
+cp -r $HOME/local/fftw-3.3.10 $SCRATCH/local
+
 # adding the following environment variable to ~/.bashrc
-export FFTW_DIR="$HOME/local/fftw-3.3.10"
+export FFTW_DIR="$SCRATCH/local/fftw-3.3.10"
 export PATH="$FFTW_DIR/bin:$PATH"
 export LD_LIBRARY_PATH="$FFTW_DIR/lib:$LD_LIBRARY_PATH"
 export CPATH="$FFTW_DIR/include:$CPATH"
@@ -133,8 +152,11 @@ make -j
 
 make install
 
+#copy to $SCRATCH
+cp -r $HOME/local/lapack-3.12.1 $SCRATCH/local
+
 # adding the following environment variable to ~/.bashrc
-export LAPACK_DIR="$HOME/local/lapack-3.12.1"
+export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
 export LD_LIBRARY_PATH="$LAPACK_DIR/lib64:$LD_LIBRARY_PATH"
 ```
 
@@ -149,24 +171,70 @@ tar -xvf v2.2.2.tar.gz
 
 cd <uncompressed-folder>
 
+mkdir build
+
+cd build
+
 cmake -DCMAKE_INSTALL_PREFIX=$HOME/local/scalapack-2.2.2 -DBUILD_SHARED_LIBS=ON ..
 
 make -j
 
 make install
+
+#copy to $SCRATCH
+cp -r $HOME/local/scalapack-2.2.2 $SCRATCH/local
+
+# adding the following environment variable to ~/.bashrc
+export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2"
+export LD_LIBRARY_PATH="$SCALAPACK_DIR/lib:$LD_LIBRARY_PATH"
 ```
-
-
 
 Now, we can use [lrc-arch-gpu.mk](lrc-arch-gpu.mk) for compilation. The file is revised from the compile file for Perlmutter.
 
+The comprehensive bashrc is shown as follows for reference.
+
+```bash
+export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
+
+export CC="$NVHPC_DIR/compilers/bin/nvc"
+export CXX="$NVHPC_DIR/compilers/bin/nvc++"
+export FC="$NVHPC_DIR/compilers/bin/nvfortran"
+export F90="$NVHPC_DIR/compilers/bin/nvfortran"
+export F77="$NVHPC_DIR/compilers/bin/nvfortran"
+
+export CPP="cpp"
+
+export CUDA_DIR="$NVHPC_DIR/cuda"
+export NVHPC_COMPILER_DIR="$NVHPC_DIR/compilers"
+export NVHPC_COMPILER_EXTRA_DIR="$NVHPC_DIR/compilers/extras/qd"
+export NCCL_DIR="$NVHPC_DIR/comm_libs/nccl"
+export NVSHMEM_DIR="$NVHPC_DIR/comm_libs/nvshmem"
+export MATHLIB_DIR="$NVHPC_DIR/math_libs"
+export NV_COMPILER_DIR="$NVHPC_DIR/compilers"
+
+export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
+export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3"
+export FFTW_DIR="$SCRATCH/local/fftw-3.3.10"
+export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
+export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2"
+
+export MANPATH="$NVHPC_DIR/compilers/man:$MANPATH"
+
+export PATH="$NVHPC_COMPILER_EXTRA_DIR/bin:$NVHPC_COMPILER_DIR/bin:$CUDA_DIR/bin:$OPENMPI_DIR/bin:$LAPACK_DIR/bin:$HDF5_DIR/bin:$FFTW_DIR/bin:$PATH"
+
+export LD_LIBRARY_PATH="$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_DIR/lib:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$OPENMPI_DIR/lib:$SCALAPACK_DIR/lib:$LAPACK_DIR/lib64:$HDF5_DIR/lib:$FFTW_DIR/lib:$LD_LIBRARY_PATH"
+
+export CPATH="$NVHPC_DIR/compilers/extras/qd/include/qd:$NVSHMEM_DIR/include:$NCCL_DIR/include:$MATHLIB_DIR/include:$OPENMPI_DIR/include:$HDF5_DIR/include:$FFTW_DIR/include:$CPATH"
+
+export OPAL_PREFIX=$OPENMPI_DIR
+export OMPI_MCA_orte_keep_fqdn_hostnames=1
+```
 
 ## Berkeley Workflow
 
 ## Environment Paths
 
 Make sure all the BerkeleyGW-related paths are correct in `scripts/site_path_config.sh`. For instance, `BerkeleyGW` folder, which contains `BerkeleyGW-master` and `berkeleygw-workflow`, should be one level above the current scripts directory.
-
 
 ## DCGM
 
