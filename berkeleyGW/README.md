@@ -41,7 +41,7 @@ module show nvhpc
 
 Then, copy the environment variables setting to `~/.bashrc` except for OpenMPI.
 
-According to the offical [website](http://manual.berkeleygw.org/2.0/compilation), we may need to build and install some libraries such as HDF5, FFTW, ScaLAPACK, OpenMPI
+According to the offical [website](http://manual.berkeleygw.org/2.0/compilation), we may need to build and install some libraries such as HDF5, FFTW, LAPACK, ScaLAPACK, OpenMPI.
 
 **OpenMPI**
 
@@ -56,7 +56,7 @@ mv openmpi-4.1.6 openmpi-4.1.6-src
 
 cd openmpi-4.1.6-src
 
-./configure --prefix=$HOME/local/openmpi-4.1.6 CFLAGS="-fPIC" CXXFLAGS="-fPIC" FFLAGS="-fPIC" FCFLAGS="-fPIC" --enable-mpi-cxx --enable-static
+./configure --prefix=$HOME/local/openmpi-4.1.6 CC=nvc FC=nvfortran CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-static --enable-heterogeneous
 
 make -j all
 
@@ -85,7 +85,7 @@ cd <uncompressed-folder>
 
 # run ./configure --help for more details
 # rename the uncompressed folder if its name is hdf5-1.14.3
-./configure --prefix=$HOME/local/hdf5-1.14.3 CC=mpicc FC=mpifort CFLAGS="-fPIC" FCFLAGS="-fpic" --enable-fortran --enable-shared --enable-parallel
+./configure --prefix=$HOME/local/hdf5-1.14.3 CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-fortran --enable-shared --enable-parallel --enable-optimization=none
 # run make as as many cores as possible
 make -j
 # install all files to prefix path, which is $HOME/local/hdf5-1.14.3
@@ -115,7 +115,7 @@ mv fftw-3.3.10 fftw-3.3.10-src
 cd fftw-3.3.10-src
 
 # rename the uncompressed folder if its name is fftw-3.3.10
-./configure --prefix=$HOME/local/fftw-3.3.10 CC=mpicc FC=mpifort --enable-shared --enable-openmp --enable-threads --enable-mpi
+./configure --prefix=$HOME/local/fftw-3.3.10 CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FFLAGS="-tp x86-64-v3 -fPIC" --enable-shared --enable-openmp --enable-threads --enable-mpi
 
 make -j
 
@@ -133,7 +133,7 @@ export CPATH="$FFTW_DIR/include:$CPATH"
 
 **LAPACK**
 
-Downloading ScaLAPACK source codes from their [website](https://www.netlib.org/lapack), taking 3.12.1 as an example,
+Downloading LAPACK source codes from their [website](https://www.netlib.org/lapack), taking 3.12.1 as an example,
 
 ```bash
 wget https://github.com/Reference-LAPACK/lapack/archive/refs/tags/v3.12.1.tar.gz
@@ -146,7 +146,7 @@ mkdir build
 
 cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=$HOME/local/lapack-3.12.1 -DBUILD_SHARED_LIBS=ON ..
+cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX=$HOME/local/lapack-3.12.1 -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON ..
 
 make -j
 
@@ -175,7 +175,7 @@ mkdir build
 
 cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=$HOME/local/scalapack-2.2.2 -DBUILD_SHARED_LIBS=ON ..
+cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX=$HOME/local/scalapack-2.2.2 -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON ..
 
 make -j
 
