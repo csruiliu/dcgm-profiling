@@ -31,9 +31,9 @@ Please use [lrc-arch-cpu.mk](lrc-arch-cpu.mk) for compilation.
 
 ### GPU-enabled Compilation 
 
-Compiling Berkeley on Lawrencium with GPU support can be challenging due to the module configuration on Lawrencium. It may require some third-party compilers and libraries, which are supported by the modules in Perlmutter. The following instructions have been validated.
+Compiling BerkeleyGW on Lawrencium with GPU support and running the compiled binaries on Einsteinium can be a little tricky due to: (1) module configurations on Lawrencium and Einsteinium, and (2) the login nodes on Lawrencium typically use Intel CPUs, whereas a number of compute nodes on Einsteinium are equipped with AMD CPUs. As a result, building BerkeleyGW may require self-compiling certain third-party libraries with cross-platform compatibility in mind. Unlike Perlmutter, where these issues are handled automatically by the module management, Lawrencium and Einsteinium require additional manual setup. The following instructions have been tested and validated for this environment.
 
-First, we want to see how `nvhpc` module set the environment variables, so that we could do the same except for OpenMPI.
+First, we want to see how `nvhpc` module set the environment variables, so that we could copy the variables except for OpenMPI.
 
 ```bash
 module show nvhpc
