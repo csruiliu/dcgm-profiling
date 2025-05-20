@@ -4,6 +4,7 @@
 #include <chrono>
 #include <mpi.h>
 #include <sys/time.h>
+#include <thread>
 
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
@@ -21,7 +22,7 @@
 #define NUM_NODE_GPUS 4
 
 // ------------------------------------------------------- //
-// Function: get_seconds
+// Timer function to profile time
 // ------------------------------------------------------- //
 struct Timer {
 #ifdef TIMING_CUDA_EVENTS
@@ -136,6 +137,7 @@ int main(int argc, char *argv[]) {
   Timer timer;
   int sizeof_gemm_t;
 
+  double host_gpu_cpy_time;
   double mpi_matmul_time;
   double mpi_scatter_time;
   double mpi_gather_time;
@@ -154,6 +156,8 @@ int main(int argc, char *argv[]) {
         alloc_gemm_host(N, &full_A_host, &B_host, &full_C_host);
         alloc_gemm_gpu(mpi_rank, N, N, &full_A_gpu, &B_gpu, &full_C_gpu);
         
+        
+        timer.record_start();
         // Copy from host to GPU        
         cudaError_t cudaErr;
         cudaErr = cudaMemcpy(full_A_gpu, full_A_host, N * N * sizeof(float), cudaMemcpyHostToDevice);
@@ -174,7 +178,12 @@ int main(int argc, char *argv[]) {
           MPI_Finalize();
           return 1;
         }
+        timer.record_stop();
+        host_gpu_cpy_time = timer.elapsed();
         
+        cudaDeviceSynchronize();
+        std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+
         cudaErr = cudaMalloc(&local_A_gpu, local_N * N * sizeof(float));
         if (cudaErr != cudaSuccess) {
           std::cerr << "Rank " << mpi_rank << "cudaMalloc local_A_gpu failed: " << cudaGetErrorString(cudaErr);
@@ -199,10 +208,15 @@ int main(int argc, char *argv[]) {
       MPI_Bcast(B_gpu, N * N, MPI_FLOAT, 0, MPI_COMM_WORLD);
       timer.record_stop();
       mpi_scatter_time = timer.elapsed();
-
+      
+      cudaDeviceSynchronize();
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       // Perform computation
       mpi_matmul_time = calc_gemm(mpi_rank, repeats, local_N, N, N, alpha, beta, local_A_gpu, B_gpu, local_C_gpu);
       
+      cudaDeviceSynchronize();
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));      
+
       // Gather results on rank 0
       timer.record_start();
       if (mpi_rank == 0) {
@@ -241,6 +255,7 @@ int main(int argc, char *argv[]) {
         alloc_gemm_host(N, &full_A_host, &B_host, &full_C_host);
         alloc_gemm_gpu(mpi_rank, N, N, &full_A_gpu, &B_gpu, &full_C_gpu);
         
+        timer.record_start();
         // Copy from host to GPU        
         cudaError_t cudaErr;
         cudaErr = cudaMemcpy(full_A_gpu, full_A_host, N * N * sizeof(double), cudaMemcpyHostToDevice);
@@ -261,7 +276,12 @@ int main(int argc, char *argv[]) {
           MPI_Finalize();
           return 1;
         }
+        timer.record_stop();
+        host_gpu_cpy_time = timer.elapsed();
 
+        cudaDeviceSynchronize();
+        std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+        
         cudaErr = cudaMalloc(&local_A_gpu, local_N * N * sizeof(double));
         if (cudaErr != cudaSuccess) {
           std::cerr << "Rank " << mpi_rank << "cudaMalloc local_A_gpu failed: " << cudaGetErrorString(cudaErr);
@@ -287,8 +307,13 @@ int main(int argc, char *argv[]) {
       timer.record_stop();
       mpi_scatter_time = timer.elapsed();
 
+      cudaDeviceSynchronize();
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       // Perform computation
       mpi_matmul_time = calc_gemm(mpi_rank, repeats, local_N, N, N, alpha, beta, local_A_gpu, B_gpu, local_C_gpu);
+
+      cudaDeviceSynchronize();
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
 
       // Gather results on rank 0
       timer.record_start();
@@ -328,6 +353,7 @@ int main(int argc, char *argv[]) {
         alloc_gemm_host(N, &full_A_host, &B_host, &full_C_host);
         alloc_gemm_gpu(mpi_rank, N, N, &full_A_gpu, &B_gpu, &full_C_gpu);
         
+        timer.record_start();
         // Copy from host to GPU        
         cudaError_t cudaErr;
         cudaErr = cudaMemcpy(full_A_gpu, full_A_host, sizeof(__half) * N * N, cudaMemcpyHostToDevice);
@@ -348,7 +374,12 @@ int main(int argc, char *argv[]) {
           MPI_Finalize();
           return 1;
         }
-        
+        timer.record_stop();
+        host_gpu_cpy_time = timer.elapsed();
+
+        cudaDeviceSynchronize();
+        std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+
         cudaErr = cudaMalloc(&local_A_gpu, local_N * N * sizeof(__half));
         if (cudaErr != cudaSuccess) {
           std::cerr << "Rank " << mpi_rank << "cudaMalloc local_A_gpu failed: " << cudaGetErrorString(cudaErr);
@@ -368,24 +399,44 @@ int main(int argc, char *argv[]) {
       
       // Distribute data
       timer.record_start();
+      MPI_Scatter(full_A_gpu, local_N * N, MPI_UINT16_T, local_A_gpu, local_N * N, MPI_UINT16_T, 0, MPI_COMM_WORLD);
+      MPI_Scatter(full_C_gpu, local_N * N, MPI_UINT16_T, local_C_gpu, local_N * N, MPI_UINT16_T, 0, MPI_COMM_WORLD);
+      MPI_Bcast(B_gpu, local_N * N, MPI_UINT16_T, 0, MPI_COMM_WORLD);
+      /*  
+      # Use MPI_BYTE as transfer unit for case 'H'
       int byte_count = local_N * N * sizeof(__half);
       MPI_Scatter(full_A_gpu, byte_count, MPI_BYTE, local_A_gpu, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
       MPI_Scatter(full_C_gpu, byte_count, MPI_BYTE, local_C_gpu, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
       MPI_Bcast(B_gpu, N * N * sizeof(__half), MPI_BYTE, 0, MPI_COMM_WORLD);
+      */
       timer.record_stop();
       mpi_scatter_time = timer.elapsed();
 
+      cudaDeviceSynchronize();
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       // Perform computation
       mpi_matmul_time = calc_gemm(mpi_rank, repeats, local_N, N, N, alpha, beta, local_A_gpu, B_gpu, local_C_gpu);
 
+      cudaDeviceSynchronize();
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      
       // Gather results on rank 0
       timer.record_start();
+      if (mpi_rank == 0) {
+        MPI_Gather(local_C_gpu, local_N * N, MPI_UINT16_T, full_C_host, local_N * N, MPI_UINT16_T, 0, MPI_COMM_WORLD);
+        check_gemm(N, full_A_host, B_host, full_C_host);
+      } else {
+        MPI_Gather(local_C_gpu, local_N * N, MPI_UINT16_T, nullptr, 0, MPI_UINT16_T, 0, MPI_COMM_WORLD);
+      }
+      /* 
+      # Use MPI_BYTE as transfer unit for case 'H'
       if (mpi_rank == 0) {
         MPI_Gather(local_C_gpu, byte_count, MPI_BYTE, full_C_host, byte_count, MPI_BYTE, 0, MPI_COMM_WORLD);
         check_gemm(N, full_A_host, B_host, full_C_host);
       } else {
         MPI_Gather(local_C_gpu, byte_count, MPI_BYTE, nullptr, 0, MPI_BYTE, 0, MPI_COMM_WORLD);
       }
+      */
       timer.record_stop();
       mpi_gather_time = timer.elapsed();
 
@@ -419,16 +470,17 @@ int main(int argc, char *argv[]) {
 
   // Output results on rank 0
   if (mpi_rank == 0) {
-    printf("\n===============================================================\n");
+    std::cout << "===============================================================" << std::endl;
     double N_dbl = (double)N;
     double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
-    printf("Memory for Matrices: %f MB\n", matrix_memory / (1024 * 1024));
-    printf("Multiply time: %f seconds\n", max_time_matmul);
-    printf("NVLink data scatter time: %f seconds\n", max_time_data_scatter);
-    printf("NVLink data gather time: %f seconds\n", max_time_data_gather);
+    std::cout << "Memory for Matrices:" << matrix_memory / (1024 * 1024) << " MB" << std::endl;
+    std::cout << "Time of Copying data from Host to one GPU: " << host_gpu_cpy_time << " seconds" << std::endl;
+    std::cout << "Multiply time: " << max_time_matmul << " seconds" << std::endl;
+    std::cout << "NVLink data scatter time: " << max_time_data_scatter << " seconds" << std::endl;
+    std::cout << "NVLink data gather time: " << max_time_data_gather << " seconds" << std::endl;
     const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
-    printf("GFLOP/s rate: %f GF/s\n", (flops_computed / max_time_matmul) / 1.0e9);
-    printf("===============================================================\n\n");
+    std::cout << "GFLOP/s rate:" << (flops_computed / max_time_matmul) / 1.0e9 << " GF/s" << std::endl;
+    std::cout << "===============================================================" << std::endl;
   }
 
   MPI_Finalize();
