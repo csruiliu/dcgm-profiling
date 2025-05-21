@@ -36,7 +36,6 @@ def process_file(file_path, metric_names):
         return df
     else:
         raise ValueError("The number of data columns doesn't match the number of metric names")
-    
 
 # Function to plot dataframe
 def plot(df, metric_names, output, dcgm_delay):
@@ -48,15 +47,7 @@ def plot(df, metric_names, output, dcgm_delay):
         plt.title(metric)
         plt.xlabel('Time Index')
         plt.ylabel('Value')
-        if metric == "GPUTL":
-            col_values = df[metric]
-            plt.ylim(0, 110)
-            plt.yticks([0, 20, 40, 60, 80, 100], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
-        elif metric == "MCUTL":
-            col_values = df[metric]
-            plt.ylim(0, 110)
-            plt.yticks([0, 20, 40, 60, 80, 100], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
-        elif metric == "PCITX":
+        if metric == "PCITX":
             col_values = [element / (1024 * 1024 * 1024) for element in df[metric]]
             plt.ylim(0, max(col_values) * 1.1)
             plt.ylabel('Rate of Data Transmitted over PCIe (GiB/s)')
@@ -85,12 +76,15 @@ def plot(df, metric_names, output, dcgm_delay):
             col_values = [element / (1000 * 1000) for element in df[metric]]
             plt.ylim(0, max(col_values) * 1.1) 
             plt.ylabel('Kilojoule (KJ)')
-        elif metric == "FP64A" or metric == "FP32A" or metric == "FP16A" or metric == "TENSO":
+        elif metric in ["FP64A", "FP32A", "FP16A", "TENSO", "DRAMA", "GRACT"]:
             plt.ylim(0, 1.1)
             plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=12)
             col_values = df[metric]
-            plt.ylabel('Ratio of cycles the tensor core is active', fontsize=12)
-            plt.xlabel('Time Index (Seconds)', fontsize=12)
+            # plt.ylabel('Ratio of cycles the tensor core is active', fontsize=12)
+        elif metric in ["MCUTL", "GPUTL"]:
+            col_values = df[metric]
+            plt.ylim(0, 110)
+            plt.yticks([0, 20, 40, 60, 80, 100], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
         else:
             plt.ylim(0, 1.1)
             plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1], ["0", "20%", "40%", "60%", "80%", "100%"], fontsize=18)
