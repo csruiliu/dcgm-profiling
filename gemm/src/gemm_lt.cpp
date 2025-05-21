@@ -47,51 +47,23 @@ int main(int argc, char *argv[]) {
   // ------------------------------------------------------- //
   // Arguments Parsing
   // ------------------------------------------------------- //
-  // argv[1] is the matrix size
-  if (argc > 1) {
-    N = atoi(argv[1]);
-    printf("Matrix size input by command line: %d\n", N);
-  } else {
-    printf("Matrix size defaulted to %d\n", N);
+  if (argc != 6) {
+    printf("Usage: %s <N> <repeats> <alpha> <beta> <precision: S|D|H|I>\n", argv[0]);
+    return 1;
   }
 
-  // argv[2] is the number of trials
-  if (argc > 2) {
-    repeats = atoi(argv[2]);
-    printf("Repeat multiply %d times.\n", repeats);
-  } else {
-    printf("Repeat multiply defaulted to %d\n", repeats);
-  }
+  N = atoi(argv[1]);
+  repeats = atoi(argv[2]);
+  alpha = atof(argv[3]);
+  beta = atof(argv[4]);
+  prec = argv[5][0];
 
-  // argv[3] is alpha
-  if (argc > 3) {
-    alpha = atof(argv[3]);
-  }
+  printf("Matrix size input by command line: %d\n", N);
+  printf("Repeat multiply %d times.\n", repeats);
   printf("Alpha =    %f\n", alpha);
-
-  // argv[4] is beta
-  if (argc > 4) {
-    beta = atof(argv[4]);
-  }
   printf("Beta  =    %f\n", beta);
-
-  // argv[5] is precision
-  if (argc > 5) {
-    if (argv[5][0] == 'S')
-      prec = 'S';
-    else if (argv[5][0] == 'D')
-      prec = 'D';
-    else if (argv[5][0] == 'H')
-      prec = 'H';
-    else if (argv[5][0] == 'I')
-      prec = 'I';
-    else {
-      printf("Reqested precision (%s) not recognized. Using default (%c).\n", argv[5], prec);
-    }
-  } else {
-    printf("Precision defaulted to %c\n", prec);
-  }
   printf("Precision =    %c\n", prec);
+
 
   double time_taken;
   int sizeof_gemm_t;
