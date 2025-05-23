@@ -99,6 +99,7 @@ def perf_modeling(gpu_dfs, metrics, sample_interval_ms, agg_interval_ms, hw_pcie
     
     num_rows = lengths[0]
     # Aggregate every `agg_samples` samples
+    # When agg_interval_ms == sample_interval_ms, aggregation is on a row basis
     agg_samples = agg_interval_ms // sample_interval_ms
 
     # Transpose the lists and take max of every `agg_samples` samples
