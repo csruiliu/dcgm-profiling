@@ -1,12 +1,18 @@
 # GPU Utilization Performance Profiling
 
-This is a simple performance evaluation for GPU utilization
+This repo provides codes for evaluating fundamental GPU performance.
 
-`eval_init.cpp`: profiling GPU utlization when initializing GPUs.   
+**Profiling GPU Initialization**
 
-`eval_io_pcie.cpp`: profiling GPU utilization when transferring data between host and a single GPU.
+`eval_init.cpp`: Measures GPU initialization overhead and startup performance metrics
 
-`eval_io_nvlink.cpp`: profiling GPU utilization when transferring data between host and mutiple GPUs using NVLINK.
+**Profiling PCIe Data Transfer**
+
+`eval_io_pcie.cpp`: Profiles host-to-GPU data transfer performance over PCIe interface for single GPU configurations
+
+**NVLink Data Transfer**
+
+`eval_io_nvlink.cpp`: Profiles host-to-GPU data transfer performance in multi-GPU configurations utilizing NVLink interconnect technology
 
 
 ```bash
@@ -16,17 +22,14 @@ cd src
 # build binary code *.x 
 make 
 
-# copy binary code to results folder
+# copy binary code to scripts folder
 cp *.x ../scripts
 
 # enter scripts folder
 cd scripts
 
-# using slurm to run script to get performance results
+# using slurm to run scripts and get performance results in `results` folder
 sbatch run_eval_init.sh
 sbatch run_eval_io_pcie.sh
 sbatch run_eval_io_nvlink.sh
-
-# check results in the results folder
-cd ../results
 ```
