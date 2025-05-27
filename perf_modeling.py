@@ -108,10 +108,11 @@ def perf_modeling(gpu_dfs, metrics, sample_interval_ms, agg_interval_ms, hw_pcie
     for start in range(0, num_rows, agg_samples):
         end = min(start + agg_samples, num_rows)
         # For each row in this window, find the max across GPUs, then find the max in the window
-        window_max = max(
-            max(t_total_dict[gpu][row_idx] for gpu in t_total_dict)
-            for row_idx in range(start, end)
-        )
+        agg_time_gpus = {
+            gpu: sum(t_total_dict[gpu][row_idx] for row_idx in range(start, end))
+            for gpu in t_total_dict
+        }
+        window_max = max(agg_time_gpus.values())
         max_list.append(window_max)
 
     print(sum(max_list))
