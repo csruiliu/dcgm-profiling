@@ -2,12 +2,16 @@
 #include <iostream>
 #include <cstdlib>
 #include <chrono>
+#include <thread>
 #include <sys/time.h>
 
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
 #include <cublasLt.h>
 #include <cuda_fp16.h>
+
+// Sleep time in milliseconds
+#define SLEEP_TIME 3000
 
 // ------------------------------------------------------- //
 // Function: get_seconds
@@ -62,15 +66,17 @@ int main(int argc, char *argv[]) {
   printf("Beta  =    %f\n", beta);
   printf("Precision =    %c\n", prec);
 
-  double time_taken;
+  double alloc_time, device_alloc_time, host_to_device_time, gemm_time, device_to_host_time;
   int sizeof_gemm_t;
   int status;
 
   switch (prec) {
     case 'S': {
       float *matrixA, *matrixB, *matrixC;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC);
-      time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
+      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
+                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
       free_gemm(matrixA, matrixB, matrixC);
       sizeof_gemm_t = sizeof(float);
@@ -78,8 +84,10 @@ int main(int argc, char *argv[]) {
     }
     case 'D': {
       double *matrixA, *matrixB, *matrixC;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC);
-      time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
+      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
+                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
       free_gemm(matrixA, matrixB, matrixC);
       sizeof_gemm_t = sizeof(double);
@@ -87,8 +95,10 @@ int main(int argc, char *argv[]) {
     }
     case 'H': {
       __half *matrixA, *matrixB, *matrixC;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC);
-      time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
+      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
+      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
+                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
       free_gemm(matrixA, matrixB, matrixC);
       sizeof_gemm_t = sizeof(__half);
@@ -98,19 +108,16 @@ int main(int argc, char *argv[]) {
 
   printf("\n");
   printf("===============================================================\n");
-
-  double N_dbl = (double) N;
+  double N_dbl = (double)N;
   double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
-
   printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1024 * 1024)));
-
-  printf("Multiply time:        %f seconds\n", time_taken);
-
-  const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)(repeats)) + (N_dbl * N_dbl * 3 * (double)(repeats));
-
-  // mprintf("FLOPs computed:       %f\n", flops_computed);
-  printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / time_taken) / 1.0e9);
-
+  printf("Time for host memory allocation and initialization: %f seconds\n", alloc_time);
+  printf("Time for device memory allocation: %f seconds\n", device_alloc_time);
+  printf("Time for host to device data transfer: %f seconds\n", host_to_device_time);
+  printf("Time for GEMM operations: %f seconds\n", gemm_time);
+  printf("Time for device to host data transfer: %f seconds\n", device_to_host_time);
+  const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
+  printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / gemm_time) / 1.0e9);
   printf("===============================================================\n");
   printf("\n");
 

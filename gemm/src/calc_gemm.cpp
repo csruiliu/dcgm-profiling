@@ -15,8 +15,9 @@
 #endif
 
 static inline void
-alloc_gemm(int N, gemm_t **pmatrixA, gemm_t **pmatrixB, gemm_t **pmatrixC) {
+alloc_gemm(int N, gemm_t **pmatrixA, gemm_t **pmatrixB, gemm_t **pmatrixC, double *alloc_time) {
   printf("Allocating Matrices...\n");
+  double start = get_seconds();
   gemm_t *__restrict__ matrixA = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
   gemm_t *__restrict__ matrixB = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
   gemm_t *__restrict__ matrixC = (gemm_t *)malloc(sizeof(gemm_t) * N * N);
@@ -30,24 +31,22 @@ alloc_gemm(int N, gemm_t **pmatrixA, gemm_t **pmatrixB, gemm_t **pmatrixC) {
       matrixC[i * N + j] = drand48() - 0.5;
     }
   }
+  double end = get_seconds();
+  *alloc_time = end - start;
 
   *pmatrixA = matrixA;
   *pmatrixB = matrixB;
   *pmatrixC = matrixC;
-  return;
 }
 
 static inline long long int
 check_gemm(int N, gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
   printf("Calculating matrix check...\n");
 
-  // double final_sum = 0;
   long long int count = 0;
 #pragma omp parallel for reduction(+ : final_sum, count)
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
-      // final_sum += matrixC[i*N + j];
-      // printf("matrixC[i*N + j] %f \n",__half2float(matrixC[i*N + j]));
       count++;
     }
   }
@@ -60,27 +59,33 @@ free_gemm(gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
   free(matrixA);
   free(matrixB);
   free(matrixC);
-  return;
 }
 
-static inline double
+static inline void
 calc_gemm(int repeats, int N, double dalpha, double dbeta,
-          gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
-
+          gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC,
+          double *device_alloc_time, double *host_to_device_time,
+          double *gemm_time, double *device_to_host_time) {
   printf("Performing multiplication...\n");
 
   gemm_t alpha = dalpha;
   gemm_t beta = dbeta;
-
-  cudaError_t errorA, errorB, errorC;
   gemm_t *d_matrixA, *d_matrixB, *d_matrixC;
-  errorA = cudaMalloc((void **)&d_matrixA, N * N * sizeof(gemm_t));
-  errorB = cudaMalloc((void **)&d_matrixB, N * N * sizeof(gemm_t));
-  errorC = cudaMalloc((void **)&d_matrixC, N * N * sizeof(gemm_t));
+
+  // Stage 2a: GPU memory allocation
+  double alloc_start = get_seconds();
+  cudaError_t errorA = cudaMalloc((void **)&d_matrixA, N * N * sizeof(gemm_t));
+  cudaError_t errorB = cudaMalloc((void **)&d_matrixB, N * N * sizeof(gemm_t));
+  cudaError_t errorC = cudaMalloc((void **)&d_matrixC, N * N * sizeof(gemm_t));
+  double alloc_end = get_seconds();
+  *device_alloc_time = alloc_end - alloc_start;
+
   if (errorA != cudaSuccess || errorB != cudaSuccess || errorC != cudaSuccess) {
     printf("ERROR: allocating device matrices\n");
     exit(1);
   }
+  
+  std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
 
   cublasStatus_t status;
   cublasHandle_t handle;
@@ -91,36 +96,50 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   }
   status = cublasSetMathMode(handle, cumode);
 
-  cublasStatus_t statusA, statusB, statusC;
-  statusA = cublasSetMatrix(N, N, sizeof(gemm_t), matrixA, N, d_matrixA, N);
-  statusB = cublasSetMatrix(N, N, sizeof(gemm_t), matrixB, N, d_matrixB, N);
-  statusC = cublasSetMatrix(N, N, sizeof(gemm_t), matrixC, N, d_matrixC, N);
+// Stage 2b: Host to GPU transfer
+  double h2d_start = get_seconds();
+  cublasStatus_t statusA = cublasSetMatrix(N, N, sizeof(gemm_t), matrixA, N, d_matrixA, N);
+  cublasStatus_t statusB = cublasSetMatrix(N, N, sizeof(gemm_t), matrixB, N, d_matrixB, N);
+  cublasStatus_t statusC = cublasSetMatrix(N, N, sizeof(gemm_t), matrixC, N, d_matrixC, N);
+  double h2d_end = get_seconds();
+  *host_to_device_time = h2d_end - h2d_start;
+
   if (statusA != CUBLAS_STATUS_SUCCESS || statusB != CUBLAS_STATUS_SUCCESS || statusC != CUBLAS_STATUS_SUCCESS) {
-    printf("ERROR: intializing device matrices\n");
+    printf("ERROR: initializing device matrices\n");
     exit(1);
   }
 
-  // Repeat multiple times
-  const double start = get_seconds();
+  std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+
+  // Stage 3: GEMM operations
+  double gemm_start = get_seconds();
   for (int r = 0; r < repeats; r++) {
-    cublasStatus_t matmulStatus;
-    matmulStatus = gemm_f(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
-                          &alpha, d_matrixA, N, d_matrixB, N, &beta, d_matrixC, N);
+    cublasStatus_t matmulStatus = gemm_f(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N,
+                                         &alpha, d_matrixA, N, d_matrixB, N, &beta, d_matrixC, N);
     if (matmulStatus != CUBLAS_STATUS_SUCCESS) {
       printf("MatMul Function failed with error %d\n", matmulStatus);
       exit(1);
     }
   }
   cudaDeviceSynchronize();
-  const double end = get_seconds();
+  double gemm_end = get_seconds();
+  *gemm_time = gemm_end - gemm_start;
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+
+  // Stage 4: GPU to Host transfer
+  double d2h_start = get_seconds();
   cublasGetMatrix(N, N, sizeof(gemm_t), d_matrixC, N, matrixC, N);
+  double d2h_end = get_seconds();
+  *device_to_host_time = d2h_end - d2h_start;
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+
+  // Free allocated memory
   cudaFree(d_matrixA);
   cudaFree(d_matrixB);
   cudaFree(d_matrixC);
   cublasDestroy(handle);
-
-  return (end - start);
 }
 
 #undef gemm_t
