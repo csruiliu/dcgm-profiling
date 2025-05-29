@@ -85,8 +85,6 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
     exit(1);
   }
   
-  //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
-
   cublasStatus_t status;
   cublasHandle_t handle;
   status = cublasCreate(&handle);
@@ -109,7 +107,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
     exit(1);
   }
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+  sleep_cpu_gpu_idle(SLEEP_TIME);
 
   // Stage 3: GEMM operations
   double gemm_start = get_seconds();
@@ -125,7 +123,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   double gemm_end = get_seconds();
   *gemm_time = gemm_end - gemm_start;
 
-  //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+  sleep_cpu_gpu_idle(SLEEP_TIME);
 
   // Stage 4: GPU to Host transfer
   double d2h_start = get_seconds();
@@ -133,7 +131,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   double d2h_end = get_seconds();
   *device_to_host_time = d2h_end - d2h_start;
 
-  //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+  sleep_cpu_gpu_idle(SLEEP_TIME);
 
   // Free allocated memory
   cudaFree(d_matrixA);

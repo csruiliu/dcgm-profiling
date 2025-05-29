@@ -11,10 +11,23 @@
 #include <cuda_fp16.h>
 
 // Sleep time in milliseconds
-#define SLEEP_TIME 5000
+#define SLEEP_TIME 40000
 
 // ------------------------------------------------------- //
-// Function: get_seconds
+// Function to make both CPU and GPU idle
+// ------------------------------------------------------- //
+inline void sleep_cpu_gpu_idle(int milliseconds) {
+    // Ensure all GPU operations are complete first
+    cudaDeviceSynchronize();
+    
+    // Now just sleep the CPU - GPU will be naturally idle
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+    
+    // GPU remains idle during this time since no kernels are launched
+}
+
+// ------------------------------------------------------- //
+// Function: get_seconds for current time
 // ------------------------------------------------------- //
 double get_seconds() {
   struct timeval now;
@@ -74,7 +87,6 @@ int main(int argc, char *argv[]) {
     case 'S': {
       float *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      // std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
                 &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
@@ -85,7 +97,6 @@ int main(int argc, char *argv[]) {
     case 'D': {
       double *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
                 &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
@@ -96,7 +107,6 @@ int main(int argc, char *argv[]) {
     case 'H': {
       __half *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
                 &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
