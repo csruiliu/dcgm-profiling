@@ -68,9 +68,9 @@ def perf_modeling_per_gpu(df, metrics, sample_intv, hw_pcie_gb, hw_nvlink_gb):
         
         t_otherGPU = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline)
 
-        t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * hw_pcie_gb) 
+        t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * hw_pcie_gb) 
 
-        t_nvlink = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * hw_nvlink_gb)
+        t_nvlink = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * hw_nvlink_gb)
 
         t_otherNode = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie - t_nvlink)
 
