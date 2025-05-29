@@ -11,7 +11,7 @@
 #include <cuda_fp16.h>
 
 // Sleep time in milliseconds
-#define SLEEP_TIME 3000
+#define SLEEP_TIME 5000
 
 // ------------------------------------------------------- //
 // Function: get_seconds
@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
     case 'S': {
       float *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      // std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
                 &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
     case 'D': {
       double *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
                 &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
@@ -96,7 +96,7 @@ int main(int argc, char *argv[]) {
     case 'H': {
       __half *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
+      //std::this_thread::sleep_for(std::chrono::milliseconds(SLEEP_TIME));
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
                 &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
       status = check_gemm(N, matrixA, matrixB, matrixC);
