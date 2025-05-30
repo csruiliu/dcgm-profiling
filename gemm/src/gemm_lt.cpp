@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
   double N_dbl = (double)N;
   double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
 
-  printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1024 * 1024)));
+  printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1000 * 1000)));
 
   printf("Multiply time:        %f seconds\n", time_taken);
 

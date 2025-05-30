@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
   printf("===============================================================\n");
   double N_dbl = (double)N;
   double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
-  printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1024 * 1024)));
+  printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1000 * 1000)));
   printf("Time for host memory allocation and initialization: %f seconds\n", alloc_time);
   printf("Time for device memory allocation: %f seconds\n", device_alloc_time);
   printf("Time for host to device data transfer: %f seconds\n", host_to_device_time);

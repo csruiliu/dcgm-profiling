@@ -473,7 +473,7 @@ int main(int argc, char *argv[]) {
     std::cout << "===============================================================" << std::endl;
     double N_dbl = (double)N;
     double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
-    std::cout << "Memory for Matrices:" << matrix_memory / (1024 * 1024) << " MB" << std::endl;
+    std::cout << "Memory for Matrices:" << matrix_memory / (1000 * 1000) << " MB" << std::endl;
     std::cout << "Time of Copying data from Host to one GPU: " << host_gpu_cpy_time << " seconds" << std::endl;
     std::cout << "Multiply time: " << max_time_matmul << " seconds" << std::endl;
     std::cout << "NVLink data scatter time: " << max_time_data_scatter << " seconds" << std::endl;
