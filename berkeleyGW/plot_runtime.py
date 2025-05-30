@@ -73,6 +73,30 @@ for i in range(len(bar_names)):
                       hatch='xx')
     home_bars.append(home_bar)
 
+# Add value labels on top of each bar
+for i in range(len(bar_names)):
+    # SHM bar annotation
+    ax.annotate(f'{shm_runtime_avg[i]:.1f}',
+                xy=(x[i] - width, shm_runtime_avg[i]),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha='center', va='bottom',
+                fontsize=9)
+    # Scratch bar annotation
+    ax.annotate(f'{scratch_runtime_avg[i]:.1f}',
+                xy=(x[i], scratch_runtime_avg[i]),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha='center', va='bottom',
+                fontsize=9)
+    # Home bar annotation
+    ax.annotate(f'{home_runtime_avg[i]:.1f}',
+                xy=(x[i] + width, home_runtime_avg[i]),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha='center', va='bottom',
+                fontsize=9)
+
 # Create custom legend with hatching patterns
 legend_elements = [
     plt.Rectangle((0,0),1,1, facecolor='gray', edgecolor='black', label='SHM'),
@@ -95,6 +119,9 @@ plt.yticks(fontsize=14)
 # Add grid for better readability
 ax.yaxis.grid(True, linestyle='--', alpha=0.7)
 ax.set_axisbelow(True)
+
+# Set y-axis limits to better show the variation
+ax.set_ylim(0, 1000)
 
 plt.tight_layout()
 plt.savefig('runtime_comparison_ordered_with_hatch.png', dpi=300, bbox_inches='tight')
@@ -136,7 +163,7 @@ ax2.yaxis.grid(True, linestyle='--', alpha=0.7)
 ax2.set_axisbelow(True)
 
 # Set y-axis limits to better show the variation
-ax2.set_ylim(750, 950)
+ax2.set_ylim(0, 1000)
 
 plt.tight_layout()
 plt.savefig('home_runtime_2m_comparison.png', dpi=300, bbox_inches='tight')
