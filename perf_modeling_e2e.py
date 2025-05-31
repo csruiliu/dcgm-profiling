@@ -125,8 +125,10 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-f', '--dcgm_file', action='store', type=str, required=True,
                         help='indicate the dcgm output file')
+    parser.add_argument('-g', '--gpu_architect', action='store', type=str, required=True, choices=['A100', 'A40', 'H100'],
+                        help='indicate the gpu architecture')
     parser.add_argument('-n', '--num_gpu', action='store', type=int, required=True,
-                        help='indicate number of gpus used for computation')
+                        help='indicate number of gpus used for computation')    
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-a', '--aggregate_interval_ms', action='store', type=int, required=True,
@@ -138,13 +140,21 @@ def main():
     args = parser.parse_args()
 
     dcgm_metric_file = args.dcgm_file
+    gpu_arch = args.gpu_architect
     num_gpu = args.num_gpu
     sample_interval_ms = args.sample_interval_ms
     agg_interval_ms = args.aggregate_interval_ms
     metric_names = args.metrics
     
-    hw_pcie_gb = 64
-    hw_nvlink_gb = 600 
+    if gpu_arch == 'A100':
+        hw_pcie_gb = 64
+        hw_nvlink_gb = 600
+    elif gpu_arch == 'A40':
+        hw_pcie_gb = 64
+        hw_nvlink_gb = 112.5
+    else:
+        hw_pcie_gb = 128
+        hw_nvlink_gb = 900
 
     profiled_results_df = process_file(num_gpu, dcgm_metric_file, metric_names)
     
