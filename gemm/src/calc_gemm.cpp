@@ -131,8 +131,6 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   double d2h_end = get_seconds();
   *device_to_host_time = d2h_end - d2h_start;
 
-  sleep_cpu_gpu_idle(SLEEP_TIME);
-
   // Free allocated memory
   cudaFree(d_matrixA);
   cudaFree(d_matrixB);
