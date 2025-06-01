@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <thread>
-#include <sys/time.h>
+#include <time.h>
 
 #include <cuda_runtime.h>
 #include "cublas_v2.h"
@@ -22,14 +22,15 @@ double sleep_timestamps[20];
 // ------------------------------------------------------- //
 // Function: get_seconds for current time
 // ------------------------------------------------------- //
-double get_seconds() {
-  struct timeval now;
-  gettimeofday(&now, NULL);
-
+double get_milliseconds() {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  
   const double seconds = (double)now.tv_sec;
-  const double usec = (double)now.tv_usec;
-
-  return seconds + (usec * 1.0e-6);
+  const double nanosec = (double)now.tv_nsec;
+  
+  // Convert nanoseconds to milliseconds
+  return (seconds * 1000.0) + (nanosec / 1000000.0);  
 }
 
 // ------------------------------------------------------- //
@@ -37,7 +38,7 @@ double get_seconds() {
 // ------------------------------------------------------- //
 inline void sleep_cpu_gpu_idle(int milliseconds) {
   // Capture timestamp before sleep
-  double sleep_start_time = get_seconds();
+  double sleep_start_time = get_milliseconds();
   
   // Increment the sleep counter (declare as extern in this file)
   extern int sleep_occurrences;
@@ -67,6 +68,8 @@ inline void sleep_cpu_gpu_idle(int milliseconds) {
 #undef PRECISION
 
 int main(int argc, char *argv[]) {
+
+  double global_start_time = get_milliseconds();
 
   int N = 4096;
   int repeats = 100;
@@ -136,19 +139,24 @@ int main(int argc, char *argv[]) {
   double N_dbl = (double)N;
   double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
   printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1000 * 1000)));
-  printf("Time for host memory allocation and initialization: %f seconds\n", alloc_time);
-  printf("Time for device memory allocation: %f seconds\n", device_alloc_time);
-  printf("Time for host to device data transfer: %f seconds\n", host_to_device_time);
-  printf("Time for GEMM operations: %f seconds\n", gemm_time);
-  printf("Time for device to host data transfer: %f seconds\n", device_to_host_time);
+  printf("Time for host memory allocation and initialization: %f milliseconds\n", alloc_time);
+  printf("Time for device memory allocation: %f milliseconds\n", device_alloc_time);
+  printf("Time for host to device data transfer: %f milliseconds\n", host_to_device_time);
+  printf("Time for GEMM operations: %f milliseconds\n", gemm_time);
+  printf("Time for device to host data transfer: %f milliseconds\n", device_to_host_time);
+  const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
+  printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / (gemm_time / 1000.0)) / 1.0e9);  // Convert back to seconds for FLOPS calculation
+  printf("===============================================================\n");
+
+  // Sleep analysis section
+  printf("===============================================================\n");
+  printf("SLEEP ANALYSIS:\n");
   printf("Sleep function called %d times\n", sleep_occurrences);
-  printf("Total sleep time: %f seconds\n", (sleep_occurrences * SLEEP_TIME) / 1000.0);
+  printf("Total sleep time: %f milliseconds\n", (double)(sleep_occurrences * SLEEP_TIME));
   printf("Sleep timestamps:\n");
   for (int i = 0; i < sleep_occurrences; i++) {
-    printf("  Sleep #%d: %f seconds\n", i + 1, sleep_timestamps[i]);
+      printf("  Sleep #%d: %f milliseconds\n", i + 1, sleep_timestamps[i] - global_start_time);
   }
-  const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
-  printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / gemm_time) / 1.0e9);
   printf("===============================================================\n");
   printf("\n");
 
