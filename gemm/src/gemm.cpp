@@ -16,22 +16,8 @@
 // Add this global variable to counter sleep calls
 int sleep_occurrences = 0;
 
-// ------------------------------------------------------- //
-// Function to make both CPU and GPU idle
-// ------------------------------------------------------- //
-inline void sleep_cpu_gpu_idle(int milliseconds) {
-    // Ensure all GPU operations are complete first
-    cudaDeviceSynchronize();
-    
-    // Now just sleep the CPU - GPU will be naturally idle
-    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
-    
-    // GPU remains idle during this time since no kernels are launched
-
-    // Increment the sleep counter (declare as extern in this file)
-    extern int sleep_occurrences;
-    sleep_occurrences++;
-  }
+// Assuming max 20 sleep calls, adjust as needed
+double sleep_timestamps[20]; 
 
 // ------------------------------------------------------- //
 // Function: get_seconds for current time
@@ -44,6 +30,28 @@ double get_seconds() {
   const double usec = (double)now.tv_usec;
 
   return seconds + (usec * 1.0e-6);
+}
+
+// ------------------------------------------------------- //
+// Function to make both CPU and GPU idle
+// ------------------------------------------------------- //
+inline void sleep_cpu_gpu_idle(int milliseconds) {
+  // Capture timestamp before sleep
+  double sleep_start_time = get_seconds();
+  
+  // Increment the sleep counter (declare as extern in this file)
+  extern int sleep_occurrences;
+  extern double sleep_timestamps[];
+  sleep_timestamps[sleep_occurrences] = sleep_start_time;
+  sleep_occurrences++;
+
+  // Ensure all GPU operations are complete first
+  cudaDeviceSynchronize();
+  
+  // Now just sleep the CPU - GPU will be naturally idle
+  std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+  
+  // GPU remains idle during this time since no kernels are launched
 }
 
 #define PRECISION 'S'
@@ -135,6 +143,10 @@ int main(int argc, char *argv[]) {
   printf("Time for device to host data transfer: %f seconds\n", device_to_host_time);
   printf("Sleep function called %d times\n", sleep_occurrences);
   printf("Total sleep time: %f seconds\n", (sleep_occurrences * SLEEP_TIME) / 1000.0);
+  printf("Sleep timestamps:\n");
+  for (int i = 0; i < sleep_occurrences; i++) {
+    printf("  Sleep #%d: %f seconds\n", i + 1, sleep_timestamps[i]);
+  }
   const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
   printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / gemm_time) / 1.0e9);
   printf("===============================================================\n");
