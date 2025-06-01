@@ -13,6 +13,9 @@
 // Sleep time in milliseconds
 #define SLEEP_TIME 40000
 
+// Add this global variable to counter sleep calls
+int sleep_occurrences = 0;
+
 // ------------------------------------------------------- //
 // Function to make both CPU and GPU idle
 // ------------------------------------------------------- //
@@ -62,8 +65,6 @@ int main(int argc, char *argv[]) {
   double alpha = 1.0;
   double beta = 1.0;
   char prec = 'D';
-
-  int sleep_occurrences = 0;
 
   // ------------------------------------------------------- //
   // Arguments Parsing
