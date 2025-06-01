@@ -108,7 +108,8 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   }
 
   sleep_cpu_gpu_idle(SLEEP_TIME);
-
+  sleep_occurrences++;
+  
   // Stage 3: GEMM operations
   double gemm_start = get_seconds();
   for (int r = 0; r < repeats; r++) {

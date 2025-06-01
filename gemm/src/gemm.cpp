@@ -24,7 +24,11 @@ inline void sleep_cpu_gpu_idle(int milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
     
     // GPU remains idle during this time since no kernels are launched
-}
+
+    // Increment the sleep counter (declare as extern in this file)
+    extern int sleep_occurrences;
+    sleep_occurrences++;
+  }
 
 // ------------------------------------------------------- //
 // Function: get_seconds for current time
@@ -58,6 +62,8 @@ int main(int argc, char *argv[]) {
   double alpha = 1.0;
   double beta = 1.0;
   char prec = 'D';
+
+  int sleep_occurrences = 0;
 
   // ------------------------------------------------------- //
   // Arguments Parsing
@@ -126,6 +132,8 @@ int main(int argc, char *argv[]) {
   printf("Time for host to device data transfer: %f seconds\n", host_to_device_time);
   printf("Time for GEMM operations: %f seconds\n", gemm_time);
   printf("Time for device to host data transfer: %f seconds\n", device_to_host_time);
+  printf("Sleep function called %d times\n", sleep_occurrences);
+  printf("Total sleep time: %f seconds\n", (sleep_occurrences * SLEEP_TIME) / 1000.0);
   const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
   printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / gemm_time) / 1.0e9);
   printf("===============================================================\n");
