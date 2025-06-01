@@ -55,17 +55,20 @@ check_gemm(int N, gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
 }
 
 static inline void
-free_gemm(gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
+free_gemm(gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC, double *free_time) {
+  double free_start = get_milliseconds();
   free(matrixA);
   free(matrixB);
   free(matrixC);
+  double free_end = get_milliseconds();
+  *free_time = free_end - free_start;
 }
 
 static inline void
 calc_gemm(int repeats, int N, double dalpha, double dbeta,
           gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC,
           double *device_alloc_time, double *host_to_device_time,
-          double *gemm_time, double *device_to_host_time) {
+          double *gemm_time, double *device_to_host_time, double *device_free_time) {
   printf("Performing multiplication...\n");
 
   gemm_t alpha = dalpha;
@@ -94,7 +97,7 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   }
   status = cublasSetMathMode(handle, cumode);
 
-// Stage 2b: Host to GPU transfer
+  // Stage 2b: Host to GPU transfer
   double h2d_start = get_milliseconds();
   cublasStatus_t statusA = cublasSetMatrix(N, N, sizeof(gemm_t), matrixA, N, d_matrixA, N);
   cublasStatus_t statusB = cublasSetMatrix(N, N, sizeof(gemm_t), matrixB, N, d_matrixB, N);
@@ -131,11 +134,14 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   double d2h_end = get_milliseconds();
   *device_to_host_time = d2h_end - d2h_start;
 
+  double device_free_start = get_milliseconds();
   // Free allocated memory
   cudaFree(d_matrixA);
   cudaFree(d_matrixB);
   cudaFree(d_matrixC);
   cublasDestroy(handle);
+  double device_free_end = get_milliseconds();
+  *device_free_time = device_free_end - device_free_start;
 }
 
 #undef gemm_t

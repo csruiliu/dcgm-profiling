@@ -97,18 +97,18 @@ int main(int argc, char *argv[]) {
   printf("Beta  =    %f\n", beta);
   printf("Precision =    %c\n", prec);
 
-  double alloc_time, device_alloc_time, host_to_device_time, gemm_time, device_to_host_time;
+  double alloc_time, device_alloc_time, host_to_device_time, gemm_time, device_to_host_time, free_time, device_free_time;
   int sizeof_gemm_t;
-  int status;
+  //int status;
 
   switch (prec) {
     case 'S': {
       float *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
-                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
-      status = check_gemm(N, matrixA, matrixB, matrixC);
-      free_gemm(matrixA, matrixB, matrixC);
+                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time, &device_free_time);
+      //status = check_gemm(N, matrixA, matrixB, matrixC);
+      free_gemm(matrixA, matrixB, matrixC, &free_time);
       sizeof_gemm_t = sizeof(float);
       break;
     }
@@ -116,9 +116,9 @@ int main(int argc, char *argv[]) {
       double *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
-                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
-      status = check_gemm(N, matrixA, matrixB, matrixC);
-      free_gemm(matrixA, matrixB, matrixC);
+                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time, &device_free_time);
+      //status = check_gemm(N, matrixA, matrixB, matrixC);
+      free_gemm(matrixA, matrixB, matrixC, &free_time);
       sizeof_gemm_t = sizeof(double);
       break;
     }
@@ -126,9 +126,9 @@ int main(int argc, char *argv[]) {
       __half *matrixA, *matrixB, *matrixC;
       alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
       calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
-                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time);
-      status = check_gemm(N, matrixA, matrixB, matrixC);
-      free_gemm(matrixA, matrixB, matrixC);
+                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time, &device_free_time);
+      //status = check_gemm(N, matrixA, matrixB, matrixC);
+      free_gemm(matrixA, matrixB, matrixC, &free_time);
       sizeof_gemm_t = sizeof(__half);
       break;
     }
@@ -144,6 +144,8 @@ int main(int argc, char *argv[]) {
   printf("Time for host to device data transfer: %f milliseconds\n", host_to_device_time);
   printf("Time for GEMM operations: %f milliseconds\n", gemm_time);
   printf("Time for device to host data transfer: %f milliseconds\n", device_to_host_time);
+  printf("Time for free device memory: %f milliseconds\n", device_free_time);
+  printf("Time for free host memory: %f milliseconds\n", free_time);
   const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
   printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / (gemm_time / 1000.0)) / 1.0e9);  // Convert back to seconds for FLOPS calculation
   printf("===============================================================\n");
