@@ -1,6 +1,7 @@
 import pandas as pd
 import argparse
 import re
+import numpy as np
 
 
 # Define a custom argument type for a list of strings
@@ -43,121 +44,20 @@ def process_file(file_path, metric_names):
     # returns a single DataFrame
     return gpu_dfs  
 
-def detect_sleep_period(numbers, n=5, exclude_trailing=True):
-    """
-    Find all non-overlapping sequences of n consecutive zeros 
-    that appear after the first non-zero number.
-    
-    Args:
-        numbers: List of numbers to search
-        n: Number of consecutive zeros to detect (default: 5)
-        exclude_trailing: If True, exclude zero sequences that extend to the end
-    
-    Returns:
-        List of tuples (start_index, end_index) for each sequence found
-    """
-        # Handle pandas Series
-    if hasattr(numbers, 'iloc'):
-        numbers_list = numbers.tolist()
-    else:
-        numbers_list = numbers
 
-    results = []
-    
-    # Convert n to integer if needed
-    if isinstance(n, float) and n.is_integer():
-        n = int(n)
-    elif not isinstance(n, int) or n <= 0:
-        raise ValueError(f"n must be a positive integer, got {n}")
-    
-    # Find the first non-zero number
-    first_nonzero_index = None
-    for i, num in enumerate(numbers_list):
-        if num != 0:
-            first_nonzero_index = i
-            break
-    
-    # If no non-zero number found, return empty list
-    if first_nonzero_index is None:
-        return results
-    
-    # Find the last non-zero number
-    last_nonzero_index = None
-    for i in range(len(numbers_list) - 1, -1, -1):
-        if numbers_list[i] != 0:
-            last_nonzero_index = i
-            break
-    
-    # Start searching for n consecutive zeros after the first non-zero
-    i = first_nonzero_index + 1
-    
-    while i <= len(numbers_list) - n:
-        # Check if we have n consecutive zeros starting at index i
-        if all(numbers_list[i+j] == 0 for j in range(n)):
-            end_index = i + n - 1
-            
-            # Check if this is a trailing sequence
-            is_trailing = exclude_trailing and all(numbers_list[j] == 0 for j in range(end_index + 1, len(numbers_list)))
-            
-            if not is_trailing:
-                results.append((i, end_index))
-            
-            i += n  # Jump past this sequence
-        else:
-            i += 1
-    
-    return results
-
-def get_non_sleep_sums_from_sleep_periods(numbers, sleep_periods):
-    """
-    Calculate sums of non-sleep periods based on detected sleep periods.
-    
-    Args:
-        numbers: List or pandas Series of numbers
-        sleep_periods: List of tuples (start_index, end_index) for sleep periods
-    
-    Returns:
-        List of sums for each non-sleep period
-    """
-    if len(numbers) == 0:
-        return []
-    
-    # Handle pandas Series
-    if hasattr(numbers, 'iloc'):
-        get_sum = lambda start, end: numbers.iloc[start:end+1].sum()
-    else:
-        get_sum = lambda start, end: sum(numbers[start:end+1])
-    
-    # If no sleep periods, sum the entire list
-    if not sleep_periods:
-        return [get_sum(0, len(numbers) - 1)]
-    
-    # Sort sleep periods by start index
-    sleep_periods = sorted(sleep_periods, key=lambda x: x[0])
-    
-    sums = []
-    
-    # Sum before first sleep period (if exists)
-    if sleep_periods[0][0] > 0:
-        sums.append(get_sum(0, sleep_periods[0][0] - 1))
-    
-    # Sums between sleep periods
-    for i in range(len(sleep_periods) - 1):
-        start = sleep_periods[i][1] + 1
-        end = sleep_periods[i + 1][0] - 1
-        if start <= end:
-            sums.append(get_sum(start, end))
-    
-    # Sum after last sleep period (if exists)
-    if sleep_periods[-1][1] < len(numbers) - 1:
-        sums.append(get_sum(sleep_periods[-1][1] + 1, len(numbers) - 1))
-    
-    return sums
-
-# Function to plot dataframe
-def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_threshold_ms, hw_pcie_gb, hw_nvlink_gb):
+def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
+    if gpu_arch == 'A100':
+        hw_pcie_gb = 64
+        hw_nvlink_gb = 600
+    elif gpu_arch == 'A40':
+        hw_pcie_gb = 64
+        hw_nvlink_gb = 112.5
+    else:
+        hw_pcie_gb = 128
+        hw_nvlink_gb = 900
+
     t_total_list = list()
     
     for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
@@ -184,17 +84,119 @@ def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_threshold_ms, hw_p
 
         t_total_list.append(t_total)
 
-    sleep_period = int(sleep_threshold_ms / sample_interval_ms)
-
-    sleep_marks = detect_sleep_period(gpu_dfs['DRAMA'], sleep_period)
-
-    sums = get_non_sleep_sums_from_sleep_periods(t_total_list, sleep_marks)
+    sleep_marks_row = [int(x / sample_interval_ms) for x in sleep_marks_list]
     
-    print(sums)
+    start_mark = 0
 
-    # print(sum(t_total))
+    time_sum_segments = list()
 
+    for sleep_mark in sleep_marks_row:
+        if sleep_mark <= len(t_total_list):
+            segment_sum = sum(t_total_list[start_mark:sleep_mark])
+            # First segment: keep original sum, others: subtract sleep time
+            if len(time_sum_segments) == 0:
+                time_sum_segments.append(segment_sum)
+            else:
+                time_sum_segments.append(segment_sum - sleep_period_ms / 1000)
+            start_mark = sleep_mark
+
+    # Add remaining elements
+    if start_mark < len(t_total_list):
+        remaining_sum = sum(t_total_list[start_mark:])
+        if len(time_sum_segments) == 0:  # If this is the first (and only) segment
+            time_sum_segments.append(remaining_sum)
+        else:
+            time_sum_segments.append(remaining_sum - sleep_period_ms / 1000)
+
+    print(time_sum_segments)
+
+
+def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch, precision):
+    sample_intv = sample_interval_ms / 1000
     
+    # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
+
+    # FP64 (Double Precision) [TFLOPS] 
+    ref_fp64 = 9.7
+    # FP64 Tensor [TFLOPS] 
+    ref_fp64_tensor = 19.5
+    # FP32 (Single Precision) [TFLOPS]
+    ref_fp32 = 19.5
+    # FP32 Tensor [TFLOPS]
+    ref_fp32_tensor = 0
+    # FP16 (Half Precision) [TFLOPS]
+    ref_fp16 = 78
+    # FP16 Tensor [TFLOPS]
+    ref_fp16_tensor = 312
+    # GPU Memory Bandwidth [GB/s]
+    ref_gpu_mem_bw = 1555
+    # PCIe Bandwidth (GB/s)
+    ref_gpu_pcie_bw = 64
+    # NVLINK Bandwidth (GB/s)
+    ref_gpu_nvlink_bw = 600
+
+    if gpu_arch == 'A40':
+        target_fp64 = 0
+        target_fp64_tensor = 0
+        target_fp32 = 37.4
+        target_fp32_tensor = 0
+        target_fp16 = 0
+        target_fp16_tensor = 149.7
+        target_gpu_mem_bw = 696
+        target_gpu_pcie_bw = 64
+        target_gpu_nvlink_bw = 112.5
+    else:
+        # H100 SXM
+        target_fp64 = 34
+        target_fp64_tensor = 67
+        target_fp32 = 67
+        target_fp32_tensor = 0
+        target_fp16 = 0
+        target_fp16_tensor = 0
+        target_gpu_mem_bw = 3350
+        target_gpu_pcie_bw = 128
+        target_gpu_nvlink_bw = 900
+    
+    if precision == 'D':
+        target_tensor = target_fp64_tensor
+        ref_tensor = ref_fp64_tensor
+    elif precision == 'S':
+        target_tensor = target_fp32_tensor
+        ref_tensor = ref_fp32_tensor
+    else:
+        target_tensor = target_fp16_tensor
+        ref_tensor = ref_fp16_tensor
+
+    t_total_target_list = list()
+    
+    for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
+        # row is a namedtuple, you can access columns via row.<colname>
+        # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
+        # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
+        metric_values = list(getattr(row, metric) for metric in metrics)
+        
+        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_tensor / target_tensor) +
+                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_fp64 / target_fp64) + 
+                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_fp32 / target_fp32) + 
+                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_fp16 / target_fp16))
+        
+        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_mem_bw / target_gpu_mem_bw)
+        
+        t_roofline_target = max(t_flop_target, t_dram_target)
+        
+        t_otherGPU_target = 
+
+        t_pcie_target =  
+
+        t_nvlink_target = 
+
+        t_otherNode_target = 
+
+        t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+
+        t_total_target_list.append(t_total_target)    
+
+    print(sum(t_total_target_list))
 
 
 def main():
@@ -206,10 +208,14 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-g', '--gpu_architect', action='store', type=str, required=True, choices=['A100', 'A40', 'H100'],
                         help='indicate the gpu architecture')
+    parser.add_argument('-p', '--precision', action='store', type=str, required=True, choices=['D', 'S', 'H']
+                        help='indicate the main precision for computation [D, S, H]')
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, required=True,
                         help='indicate the sleep period during GPU execution in milliseconds')  
+    parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', required=True,
+                        help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
     parser.add_argument('-h', '--help', action='help',
@@ -218,24 +224,17 @@ def main():
 
     dcgm_metric_file = args.dcgm_file
     gpu_arch = args.gpu_architect
+    precision = args.precision
     sample_interval_ms = args.sample_interval_ms
-    sleep_threshold_ms = args.sleep_period_ms
+    sleep_period_ms = args.sleep_period_ms
+    sleep_marks_list = args.sleep_marks
     metric_names = args.metrics
-    
-    if gpu_arch == 'A100':
-        hw_pcie_gb = 64
-        hw_nvlink_gb = 600
-    elif gpu_arch == 'A40':
-        hw_pcie_gb = 64
-        hw_nvlink_gb = 112.5
-    else:
-        hw_pcie_gb = 128
-        hw_nvlink_gb = 900
 
     profiled_results_df = process_file(dcgm_metric_file, metric_names)
     
-    perf_modeling(profiled_results_df, metric_names, sample_interval_ms, sleep_threshold_ms, hw_pcie_gb, hw_nvlink_gb)
-
+    perf_modeling(profiled_results_df, metric_names, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch)
+    
+    perf_predict(profiled_results_df, metric_names, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch, precision)
 
 if __name__=="__main__":
     main()
