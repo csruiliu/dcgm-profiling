@@ -134,12 +134,13 @@ calc_gemm(int repeats, int N, double dalpha, double dbeta,
   double d2h_end = get_milliseconds();
   *device_to_host_time = d2h_end - d2h_start;
 
-  double device_free_start = get_milliseconds();
   // Free allocated memory
+  double device_free_start = get_milliseconds();
   cudaFree(d_matrixA);
   cudaFree(d_matrixB);
   cudaFree(d_matrixC);
   cublasDestroy(handle);
+  cudaDeviceSynchronize();
   double device_free_end = get_milliseconds();
   *device_free_time = device_free_end - device_free_start;
 }

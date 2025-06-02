@@ -142,10 +142,13 @@ int main(int argc, char *argv[]) {
   printf("Time for host memory allocation and initialization: %f milliseconds\n", alloc_time);
   printf("Time for device memory allocation: %f milliseconds\n", device_alloc_time);
   printf("Time for host to device data transfer: %f milliseconds\n", host_to_device_time);
+  printf("Stage 1: %f seconds\n", (alloc_time + device_alloc_time + host_to_device_time) / 1000);
   printf("Time for GEMM operations: %f milliseconds\n", gemm_time);
+  printf("Stage 2: %f seconds\n", gemm_time / 1000);
   printf("Time for device to host data transfer: %f milliseconds\n", device_to_host_time);
   printf("Time for free device memory: %f milliseconds\n", device_free_time);
   printf("Time for free host memory: %f milliseconds\n", free_time);
+  printf("Stage 3: %f seconds\n", (device_to_host_time + device_free_time + free_time) / 1000);
   const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
   printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / (gemm_time / 1000.0)) / 1.0e9);  // Convert back to seconds for FLOPS calculation
   printf("===============================================================\n");
