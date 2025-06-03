@@ -97,7 +97,7 @@ int main(int argc, char *argv[]) {
   printf("Beta  =    %f\n", beta);
   printf("Precision =    %c\n", prec);
 
-  double alloc_time, device_alloc_time, host_to_device_time, gemm_time, device_to_host_time, free_time, device_free_time;
+  double alloc_time, device_alloc_time, host_to_device_time, gemm_time, device_to_host_time, free_time, device_free_time, overall_time;
   int sizeof_gemm_t;
   //int status;
 
@@ -165,5 +165,10 @@ int main(int argc, char *argv[]) {
   printf("===============================================================\n");
   printf("\n");
 
+  double global_end_time = get_milliseconds();
+  overall_time = global_end_time - global_start_time;
+  printf("===============================================================\n");
+  printf("Overll runtime time: %f milliseconds\n", overall_time);
+  printf("===============================================================\n");
   return 0;
 }
