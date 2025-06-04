@@ -119,7 +119,7 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     print(time_sum_segments_final)
 
 
-def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch, precision):
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
     # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
@@ -177,6 +177,22 @@ def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_ma
         # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
         metric_values = list(getattr(row, metric) for metric in metrics)
         
+        t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
+                                    metric_values[metrics.index('FP64A')] + 
+                                    metric_values[metrics.index('FP32A')] + 
+                                    metric_values[metrics.index('FP16A')])  
+        t_dram_ref = sample_intv * metric_values[metrics.index('DRAMA')]
+        
+        t_roofline_ref = max(t_flop_ref, t_dram_ref)
+        
+        t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
+
+        t_pcie_ref = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_pcie_bw) 
+
+        t_nvlink_ref = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_nvlink_bw)
+
+        t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
+
         t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_tensor / target_tensor) +
                          sample_intv * metric_values[metrics.index('FP64A')] * (ref_fp64 / target_fp64) + 
                          sample_intv * metric_values[metrics.index('FP32A')] * (ref_fp32 / target_fp32) + 
@@ -186,19 +202,25 @@ def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_ma
         
         t_roofline_target = max(t_flop_target, t_dram_target)
         
-        #t_otherGPU_target = 
+        t_otherGPU_target = t_otherGPU_ref
 
-        #t_pcie_target =  
+        t_pcie_target = t_pcie_ref * (ref_gpu_pcie_bw / target_gpu_pcie_bw)
 
-        #t_nvlink_target = 
+        t_nvlink_target = t_nvlink_ref * (ref_gpu_nvlink_bw / target_gpu_nvlink_bw)
 
-        #t_otherNode_target = 
+        t_otherNode_target = t_otherNode_ref
 
-        #t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        #t_total_target_list.append(t_total_target)    
+        t_total_target_list.append(t_total_target)    
 
-    print(sum(t_total_target_list))
+    finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
+    if finish_idx < len(t_total_target_list):
+        t_total_target_list_finish = t_total_target_list[:finish_idx]
+    else:
+        t_total_target_list_finish = t_total_target_list
+ 
+    print(sum(t_total_target_list_finish))
 
 
 def main():
@@ -239,7 +261,7 @@ def main():
     
     perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch)
     
-    # perf_predict(profiled_df, metrics, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch, precision)
+    perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, gpu_arch)
 
 if __name__=="__main__":
     main()
