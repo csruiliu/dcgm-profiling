@@ -45,7 +45,7 @@ def process_file(file_path, metric_names):
     return gpu_dfs  
 
 
-def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch):
+def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
     if gpu_arch == 'A100':
@@ -60,7 +60,7 @@ def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_m
 
     t_total_list = list()
     
-    for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
+    for row in profiled_df.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
         # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
         # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
@@ -84,15 +84,22 @@ def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_m
 
         t_total_list.append(t_total)
 
-    sleep_marks_row = [int(x / sample_interval_ms) for x in sleep_marks_list]
-    
+    # get the sleep and finish index according to the actual sleep time
+    sleep_idx_list = [int(x / sample_interval_ms) for x in sleep_marks_list]
+    finish_idx = int(overall_runtime_ms / sample_interval_ms)
+
+    if finish_idx < len(t_total_list):
+        t_total_list_finish = t_total_list[:finish_idx]
+    else:
+        t_total_list_finish = t_total_list
+
     start_mark = 0
 
     time_sum_segments = list()
 
-    for sleep_mark in sleep_marks_row:
-        if sleep_mark <= len(t_total_list):
-            segment_sum = sum(t_total_list[start_mark:sleep_mark])
+    for sleep_mark in sleep_idx_list:
+        if sleep_mark <= len(t_total_list_finish):
+            segment_sum = sum(t_total_list_finish[start_mark:sleep_mark])
             # First segment: keep original sum, others: subtract sleep time
             if len(time_sum_segments) == 0:
                 time_sum_segments.append(segment_sum)
@@ -101,14 +108,15 @@ def perf_modeling(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_m
             start_mark = sleep_mark
 
     # Add remaining elements
-    if start_mark < len(t_total_list):
-        remaining_sum = sum(t_total_list[start_mark:])
+    if start_mark < len(t_total_list_finish):
+        remaining_sum = sum(t_total_list_finish[start_mark:])
         if len(time_sum_segments) == 0:  # If this is the first (and only) segment
             time_sum_segments.append(remaining_sum)
         else:
             time_sum_segments.append(remaining_sum - sleep_period_ms / 1000)
-
-    print(time_sum_segments)
+    
+    time_sum_segments_final = [0 if x < 0 else x for x in time_sum_segments]
+    print(time_sum_segments_final)
 
 
 def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch, precision):
@@ -122,8 +130,8 @@ def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_ma
     ref_fp64_tensor = 19.5
     # FP32 (Single Precision) [TFLOPS]
     ref_fp32 = 19.5
-    # FP32 Tensor [TFLOPS]
-    ref_fp32_tensor = 0
+    # FP32 Tensor [TFLOPS], Take TF32
+    ref_fp32_tensor = 156
     # FP16 (Half Precision) [TFLOPS]
     ref_fp16 = 78
     # FP16 Tensor [TFLOPS]
@@ -136,11 +144,11 @@ def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_ma
     ref_gpu_nvlink_bw = 600
 
     if gpu_arch == 'A40':
-        target_fp64 = 0
+        target_fp64 = 0.58
         target_fp64_tensor = 0
         target_fp32 = 37.4
-        target_fp32_tensor = 0
-        target_fp16 = 0
+        target_fp32_tensor = 74.8
+        target_fp16 = 37.4
         target_fp16_tensor = 149.7
         target_gpu_mem_bw = 696
         target_gpu_pcie_bw = 64
@@ -150,22 +158,16 @@ def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_ma
         target_fp64 = 34
         target_fp64_tensor = 67
         target_fp32 = 67
-        target_fp32_tensor = 0
-        target_fp16 = 0
-        target_fp16_tensor = 0
+        target_fp32_tensor = 494.7
+        target_fp16 = 133.8
+        target_fp16_tensor = 989.4
         target_gpu_mem_bw = 3350
         target_gpu_pcie_bw = 128
         target_gpu_nvlink_bw = 900
     
-    if precision == 'D':
-        target_tensor = target_fp64_tensor
-        ref_tensor = ref_fp64_tensor
-    elif precision == 'S':
-        target_tensor = target_fp32_tensor
-        ref_tensor = ref_fp32_tensor
-    else:
-        target_tensor = target_fp16_tensor
-        ref_tensor = ref_fp16_tensor
+    # Taking FP64 tensor as general tensor
+    ref_tensor = ref_fp64_tensor
+    target_tensor = target_fp64_tensor
 
     t_total_target_list = list()
     
@@ -184,17 +186,17 @@ def perf_predict(gpu_dfs, metrics, sample_interval_ms, sleep_period_ms, sleep_ma
         
         t_roofline_target = max(t_flop_target, t_dram_target)
         
-        t_otherGPU_target = 
+        #t_otherGPU_target = 
 
-        t_pcie_target =  
+        #t_pcie_target =  
 
-        t_nvlink_target = 
+        #t_nvlink_target = 
 
-        t_otherNode_target = 
+        #t_otherNode_target = 
 
-        t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        #t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_target_list.append(t_total_target)    
+        #t_total_target_list.append(t_total_target)    
 
     print(sum(t_total_target_list))
 
@@ -208,12 +210,14 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-g', '--gpu_architect', action='store', type=str, required=True, choices=['A100', 'A40', 'H100'],
                         help='indicate the gpu architecture')
-    parser.add_argument('-p', '--precision', action='store', type=str, required=True, choices=['D', 'S', 'H']
+    parser.add_argument('-p', '--precision', action='store', type=str, required=True, choices=['D', 'S', 'H'],
                         help='indicate the main precision for computation [D, S, H]')
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, required=True,
                         help='indicate the sleep period during GPU execution in milliseconds')  
+    parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
+                        help='indicate the timestamp for overall runtime in milliseconds')
     parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', required=True,
                         help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
@@ -227,14 +231,15 @@ def main():
     precision = args.precision
     sample_interval_ms = args.sample_interval_ms
     sleep_period_ms = args.sleep_period_ms
-    sleep_marks_list = args.sleep_marks
-    metric_names = args.metrics
+    overall_runtime_ms = args.overall_runtime_ms
+    sleep_marks = args.sleep_marks
+    metrics = args.metrics
 
-    profiled_results_df = process_file(dcgm_metric_file, metric_names)
+    profiled_df = process_file(dcgm_metric_file, metrics)
     
-    perf_modeling(profiled_results_df, metric_names, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch)
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch)
     
-    perf_predict(profiled_results_df, metric_names, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch, precision)
+    # perf_predict(profiled_df, metrics, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch, precision)
 
 if __name__=="__main__":
     main()
