@@ -232,8 +232,6 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-g', '--gpu_architect', action='store', type=str, required=True, choices=['A100', 'A40', 'H100'],
                         help='indicate the gpu architecture')
-    parser.add_argument('-p', '--precision', action='store', type=str, required=True, choices=['D', 'S', 'H'],
-                        help='indicate the main precision for computation [D, S, H]')
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, required=True,
@@ -250,7 +248,6 @@ def main():
 
     dcgm_metric_file = args.dcgm_file
     gpu_arch = args.gpu_architect
-    precision = args.precision
     sample_interval_ms = args.sample_interval_ms
     sleep_period_ms = args.sleep_period_ms
     overall_runtime_ms = args.overall_runtime_ms
