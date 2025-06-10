@@ -51,7 +51,7 @@ def process_file(num_gpu, file_path, metric_names):
 
     
 # Function to plot dataframe
-def perf_modeling_per_gpu(df, metrics, sample_intv, hw_pcie_gb, hw_nvlink_gb):
+def perf_modeling_per_gpu(df, metrics, finish_idx, sample_intv, hw_pcie_gb, hw_nvlink_gb):
     t_total_list = list()
     
     for row in df.itertuples(index=False, name='MetricRow'):
@@ -77,16 +77,33 @@ def perf_modeling_per_gpu(df, metrics, sample_intv, hw_pcie_gb, hw_nvlink_gb):
         t_total = t_roofline + t_otherGPU + t_pcie + t_nvlink + t_otherNode
 
         t_total_list.append(t_total)
+    
+    if finish_idx < len(t_total_list):
+        t_total_list_finish = t_total_list[:finish_idx]
+    else:
+        t_total_list_finish = t_total_list
 
-    return t_total_list
+    return t_total_list_finish
 
 
-def perf_modeling(gpu_dfs, metrics, sample_interval_ms, agg_interval_ms, hw_pcie_gb, hw_nvlink_gb):
+def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, gpu_arch):
     sample_interval = sample_interval_ms / 1000
+    finish_idx = int(overall_runtime_ms / sample_interval_ms)
+
+    if gpu_arch == 'A100':
+        hw_pcie_gb = 64
+        hw_nvlink_gb = 600
+    elif gpu_arch == 'A40':
+        hw_pcie_gb = 64
+        hw_nvlink_gb = 112.5
+    else:
+        hw_pcie_gb = 128
+        hw_nvlink_gb = 900
+
     t_total_dict = dict()
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_totals = perf_modeling_per_gpu(df, metrics, sample_interval, hw_pcie_gb, hw_nvlink_gb)
+            t_totals = perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval, hw_pcie_gb, hw_nvlink_gb)
             t_total_dict[f"GPU{i}"] = t_totals
         else:
             raise ValueError("The total time list is empty")
@@ -129,7 +146,9 @@ def main():
                         help='indicate the gpu architecture')
     parser.add_argument('-n', '--num_gpu', action='store', type=int, required=True,
                         help='indicate number of gpus used for computation')    
-    parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
+    parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
+                        help='indicate the timestamp for overall runtime in milliseconds')
+    parser.add_argument('-s', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-a', '--aggregate_interval_ms', action='store', type=int, required=True,
                         help='indicate the time interval for aggregation in milliseconds') 
@@ -142,23 +161,14 @@ def main():
     dcgm_metric_file = args.dcgm_file
     gpu_arch = args.gpu_architect
     num_gpu = args.num_gpu
+    overall_runtime_ms = args.overall_runtime_ms
     sample_interval_ms = args.sample_interval_ms
     agg_interval_ms = args.aggregate_interval_ms
     metric_names = args.metrics
     
-    if gpu_arch == 'A100':
-        hw_pcie_gb = 64
-        hw_nvlink_gb = 600
-    elif gpu_arch == 'A40':
-        hw_pcie_gb = 64
-        hw_nvlink_gb = 112.5
-    else:
-        hw_pcie_gb = 128
-        hw_nvlink_gb = 900
-
     profiled_results_df = process_file(num_gpu, dcgm_metric_file, metric_names)
     
-    perf_modeling(profiled_results_df, metric_names, sample_interval_ms, agg_interval_ms, hw_pcie_gb, hw_nvlink_gb)
+    perf_modeling(profiled_results_df, metric_names, overall_runtime_ms, sample_interval_ms, agg_interval_ms, gpu_arch)
 
 
 if __name__=="__main__":
