@@ -48,13 +48,14 @@ def process_file(file_path, metric_names):
 def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
-    if gpu_arch == 'A100':
+    if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
         hw_pcie_gb = 64
         hw_nvlink_gb = 600
     elif gpu_arch == 'A40':
         hw_pcie_gb = 64
         hw_nvlink_gb = 112.5
-    else:
+    else: 
+        # this case is H100
         hw_pcie_gb = 128
         hw_nvlink_gb = 900
 
@@ -119,56 +120,45 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     print(time_sum_segments_final)
 
 
-def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, gpu_arch):
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, ref_gpu_arch, target_gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
     # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
+    GPU_SPECS = {
+        "A100-40": {
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
+        },
+        "A100-80": {
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
+        },
+        "A40": {
+            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8,
+            "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
+        },
+        "H100": {  # H100 SXM (default)
+            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 494.7,
+            "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
+        }
+    }
 
-    # FP64 (Double Precision) [TFLOPS] 
-    ref_fp64 = 9.7
-    # FP64 Tensor [TFLOPS] 
-    ref_fp64_tensor = 19.5
-    # FP32 (Single Precision) [TFLOPS]
-    ref_fp32 = 19.5
-    # FP32 Tensor [TFLOPS], Take TF32
-    ref_fp32_tensor = 156
-    # FP16 (Half Precision) [TFLOPS]
-    ref_fp16 = 78
-    # FP16 Tensor [TFLOPS]
-    ref_fp16_tensor = 312
-    # GPU Memory Bandwidth [GB/s]
-    ref_gpu_mem_bw = 1555
-    # PCIe Bandwidth (GB/s)
-    ref_gpu_pcie_bw = 64
-    # NVLINK Bandwidth (GB/s)
-    ref_gpu_nvlink_bw = 600
+    def get_gpu_specs(gpu_arch, prefix):
+        """Get GPU specifications with appropriate prefix."""
+        try:
+            specs = GPU_SPECS.get(gpu_arch)
+            return {f"{prefix}_{key}": value for key, value in specs.items()}
+        except KeyError:
+            print("GPU architect is not found in GPU SPEC DICT")
+        
+    # Get specifications for both reference and target GPUs
+    ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
+    target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
 
-    if gpu_arch == 'A40':
-        target_fp64 = 0.58
-        target_fp64_tensor = 0
-        target_fp32 = 37.4
-        target_fp32_tensor = 74.8
-        target_fp16 = 37.4
-        target_fp16_tensor = 149.7
-        target_gpu_mem_bw = 696
-        target_gpu_pcie_bw = 64
-        target_gpu_nvlink_bw = 112.5
-    else:
-        # H100 SXM
-        target_fp64 = 34
-        target_fp64_tensor = 67
-        target_fp32 = 67
-        target_fp32_tensor = 494.7
-        target_fp16 = 133.8
-        target_fp16_tensor = 989.4
-        target_gpu_mem_bw = 3350
-        target_gpu_pcie_bw = 128
-        target_gpu_nvlink_bw = 900
-    
     # Taking FP64 tensor as general tensor
-    ref_tensor = ref_fp64_tensor
-    target_tensor = target_fp64_tensor
-
+    ref_tensor = ref_gpu_spec["ref_fp64_tensor"]
+    target_tensor = target_gpu_spec["target_fp64_tensor"]
+    
     t_total_target_list = list()
     
     for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
@@ -187,26 +177,26 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, g
         
         t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
 
-        t_pcie_ref = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_pcie_bw) 
+        t_pcie_ref = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_gpu_pcie_bw"]) 
 
-        t_nvlink_ref = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_nvlink_bw)
+        t_nvlink_ref = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_gpu_nvlink_bw"])
 
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_tensor / target_tensor) +
-                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_fp64 / target_fp64) + 
-                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_fp32 / target_fp32) + 
-                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_fp16 / target_fp16))
+        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
+                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
         
-        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_mem_bw / target_gpu_mem_bw)
+        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_gpu_mem_bw"] / target_gpu_spec["target_gpu_mem_bw"])
         
         t_roofline_target = max(t_flop_target, t_dram_target)
         
         t_otherGPU_target = t_otherGPU_ref
 
-        t_pcie_target = t_pcie_ref * (ref_gpu_pcie_bw / target_gpu_pcie_bw)
+        t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_gpu_pcie_bw"] / target_gpu_spec["target_gpu_pcie_bw"])
 
-        t_nvlink_target = t_nvlink_ref * (ref_gpu_nvlink_bw / target_gpu_nvlink_bw)
+        t_nvlink_target = t_nvlink_ref * (ref_gpu_spec["ref_gpu_nvlink_bw"] / target_gpu_spec["target_gpu_nvlink_bw"])
 
         t_otherNode_target = t_otherNode_ref
 
@@ -230,14 +220,16 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-f', '--dcgm_file', action='store', type=str, required=True,
                         help='indicate the dcgm output file')
-    parser.add_argument('-g', '--gpu_architect', action='store', type=str, required=True, choices=['A100', 'A40', 'H100'],
-                        help='indicate the gpu architecture')
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, required=True,
                         help='indicate the sleep period during GPU execution in milliseconds')  
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
                         help='indicate the timestamp for overall runtime in milliseconds')
+    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, choices=['A100-40', 'A100-80', 'A40', 'H100'],
+                        help='indicate the gpu architecture')
+    parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, choices=['A100-40', 'A100-80', 'A40', 'H100'],
+                        help='indicate the gpu architecture')
     parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', required=True,
                         help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
@@ -247,18 +239,20 @@ def main():
     args = parser.parse_args()
 
     dcgm_metric_file = args.dcgm_file
-    gpu_arch = args.gpu_architect
     sample_interval_ms = args.sample_interval_ms
     sleep_period_ms = args.sleep_period_ms
     overall_runtime_ms = args.overall_runtime_ms
     sleep_marks = args.sleep_marks
     metrics = args.metrics
-
+    ref_gpu_arch = args.ref_gpu_architect
+    target_gpu_arch = args.target_gpu_architect
+    
     profiled_df = process_file(dcgm_metric_file, metrics)
     
-    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch)
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, ref_gpu_arch)
     
-    perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, gpu_arch)
+    if target_gpu_arch is not None:
+        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, ref_gpu_arch, target_gpu_arch)
 
 if __name__=="__main__":
     main()
