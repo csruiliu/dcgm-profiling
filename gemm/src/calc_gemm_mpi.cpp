@@ -100,7 +100,7 @@ check_gemm(int N, gemm_t *matrixA, gemm_t *matrixB, gemm_t *matrixC) {
   return 0;
 }
 
-static inline double
+static inline void
 calc_gemm(int rank, int repeats, int M, int N, int K, double dalpha, double dbeta, gemm_t *d_A, gemm_t *d_B, gemm_t *d_C) {
   std::cout << "Rank " << rank << ": Performing multiplication..." << std::endl;
   
@@ -136,8 +136,6 @@ calc_gemm(int rank, int repeats, int M, int N, int K, double dalpha, double dbet
     exit(1);
   }
 
-  Timer timer;
-  timer.record_start();
   for (int r = 0; r < repeats; r++) {
     cublasStatus_t matmulStatus = gemm_f(handle,
                                          CUBLAS_OP_N,
@@ -159,11 +157,9 @@ calc_gemm(int rank, int repeats, int M, int N, int K, double dalpha, double dbet
   cudaDeviceSynchronize();
 
   cublasGetMatrix(M, N, sizeof(gemm_t), d_matrixC, M, d_C, M);
-  timer.record_stop();
 
   cudaFree(d_matrixC);
   cublasDestroy(handle);
-  return timer.elapsed();
 }
 
 #undef gemm_t
