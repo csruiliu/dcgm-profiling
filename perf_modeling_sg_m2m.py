@@ -226,16 +226,14 @@ def main():
                         help='indicate the sleep period during GPU execution in milliseconds')  
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
                         help='indicate the timestamp for overall runtime in milliseconds')
-    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, choices=['A100-40', 'A100-80', 'A40', 'H100'],
-                        help='indicate the gpu architecture')
-    parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, choices=['A100-40', 'A100-80', 'A40', 'H100'],
-                        help='indicate the gpu architecture')
+    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
+                        choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the reference gpu architecture')
+    parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
+                        choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the target gpu architecture')
     parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', required=True,
                         help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
-    parser.add_argument('-h', '--help', action='help',
-                        help='Example: python3 dcgm_analyze.py -f gpu_util/results/xx.100.out -o ./gpu_util/results -d 100 --metrics GRACT,PCITX,PCIRX')
     args = parser.parse_args()
 
     dcgm_metric_file = args.dcgm_file

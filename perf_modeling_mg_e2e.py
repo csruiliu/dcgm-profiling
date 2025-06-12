@@ -90,7 +90,7 @@ def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_
     sample_interval = sample_interval_ms / 1000
     finish_idx = int(overall_runtime_ms / sample_interval_ms)
 
-    if gpu_arch == 'A100':
+    if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
         hw_pcie_gb = 64
         hw_nvlink_gb = 600
     elif gpu_arch == 'A40':
@@ -135,6 +135,132 @@ def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_
     print(sum(max_list))
 
 
+def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec):
+    t_total_target_list = list()
+    
+    for row in df.itertuples(index=False, name='MetricRow'):
+        # row is a namedtuple, you can access columns via row.<colname>
+        # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
+        # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
+        metric_values = list(getattr(row, metric) for metric in metrics)
+        
+        t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
+                                    metric_values[metrics.index('FP64A')] + 
+                                    metric_values[metrics.index('FP32A')] + 
+                                    metric_values[metrics.index('FP16A')])  
+        
+        t_dram_ref = sample_intv * metric_values[metrics.index('DRAMA')]
+        
+        t_roofline_ref = max(t_flop_ref, t_dram_ref)
+        
+        t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
+        
+        t_pcie_ref = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_pcie_bw"]) 
+        
+        t_nvlink_ref = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_nvlink_bw"])
+        
+        t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
+
+        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
+                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+
+        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
+        
+        t_roofline_target = max(t_flop_target, t_dram_target)
+        
+        t_otherGPU_target = t_otherGPU_ref
+
+        t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
+        
+        t_nvlink_target = t_nvlink_ref * (ref_gpu_spec["ref_nvlink_bw"] / target_gpu_spec["target_nvlink_bw"])
+        
+        t_otherNode_target = t_otherNode_ref
+
+        t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+
+        t_total_target_list.append(t_total_target)  
+    
+    if finish_idx < len(t_total_target_list):
+        t_total_list_finish = t_total_target_list[:finish_idx]
+    else:
+        t_total_list_finish = t_total_target_list
+
+    return t_total_list_finish
+
+
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch):
+    sample_intv = sample_interval_ms / 1000
+    finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
+
+    # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
+    GPU_SPECS = {
+        "A100-40": {
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
+        },
+        "A100-80": {
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
+        },
+        "A40": {
+            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8,
+            "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
+        },
+        "H100": {  # H100 SXM (default)
+            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 494.7,
+            "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
+        }
+    }
+
+    def get_gpu_specs(gpu_arch, prefix):
+        """Get GPU specifications with appropriate prefix."""
+        try:
+            specs = GPU_SPECS.get(gpu_arch)
+            return {f"{prefix}_{key}": value for key, value in specs.items()}
+        except KeyError:
+            print("GPU architect is not found in GPU SPEC DICT")
+        
+    # Get specifications for both reference and target GPUs
+    ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
+    target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
+
+    t_total_dict = dict()
+    for i, df in enumerate(gpu_dfs):
+        if not df.empty:
+            t_totals = pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec)
+            t_total_dict[f"GPU{i}"] = t_totals
+        else:
+            raise ValueError("The total time list is empty")
+
+    # Now compute the max for each row index
+    # First, check that all lists are of the same length
+    lengths = [len(lst) for lst in t_total_dict.values()]
+    if len(set(lengths)) != 1:
+        raise ValueError("Not all GPU t_total lists are of the same length!")
+    
+    num_rows = lengths[0]
+    # Aggregate every `agg_samples` samples
+    # When agg_interval_ms == sample_interval_ms, aggregation is on a row basis
+    agg_samples = agg_interval_ms // sample_interval_ms
+
+    # Transpose the lists and take max of every `agg_samples` samples
+    max_list = []
+    
+    for start in range(0, num_rows, agg_samples):
+        end = min(start + agg_samples, num_rows)
+        # For each row in this window, find the max across GPUs, then find the max in the window
+        agg_time_gpus = {
+            gpu: sum(t_total_dict[gpu][row_idx] for row_idx in range(start, end))
+            for gpu in t_total_dict
+        }
+        window_max = max(agg_time_gpus.values())
+        max_list.append(window_max)
+
+    print(sum(max_list))
+
+
 def main():
     ###################################
     # get all parameters
@@ -142,8 +268,6 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-f', '--dcgm_file', action='store', type=str, required=True,
                         help='indicate the dcgm output file')
-    parser.add_argument('-g', '--gpu_architect', action='store', type=str, required=True, choices=['A100', 'A40', 'H100'],
-                        help='indicate the gpu architecture')
     parser.add_argument('-n', '--num_gpu', action='store', type=int, required=True,
                         help='indicate number of gpus used for computation')    
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
@@ -152,23 +276,29 @@ def main():
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-a', '--aggregate_interval_ms', action='store', type=int, required=True,
                         help='indicate the time interval for aggregation in milliseconds') 
+    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
+                        choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the reference gpu architecture')
+    parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
+                        choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
-    parser.add_argument('-h', '--help', action='help',
-                        help='Example: python3 dcgm_analyze.py -f gpu_util/results/xx.100.out -o ./gpu_util/results -d 100 --metrics GRACT,PCITX,PCIRX')
     args = parser.parse_args()
 
     dcgm_metric_file = args.dcgm_file
-    gpu_arch = args.gpu_architect
     num_gpu = args.num_gpu
     overall_runtime_ms = args.overall_runtime_ms
     sample_interval_ms = args.sample_interval_ms
     agg_interval_ms = args.aggregate_interval_ms
-    metric_names = args.metrics
+    metrics = args.metrics
+    ref_gpu_arch = args.ref_gpu_architect
+    target_gpu_arch = args.target_gpu_architect
     
-    profiled_results_df = process_file(num_gpu, dcgm_metric_file, metric_names)
+    profiled_df = process_file(num_gpu, dcgm_metric_file, metrics)
     
-    perf_modeling(profiled_results_df, metric_names, overall_runtime_ms, sample_interval_ms, agg_interval_ms, gpu_arch)
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch)
+
+    if target_gpu_arch is not None:
+        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch)
 
 
 if __name__=="__main__":
