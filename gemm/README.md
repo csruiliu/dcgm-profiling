@@ -53,3 +53,17 @@ sbatch run_gemm.sh
 sbatch run_gemm_lt.sh
 sbatch run_gemm_mpi.sh
 ```
+
+## Running GEMM on Lawrencium/Einsteinium Cluster
+
+For some unknown reason, it is necessary to compile OpenMPI-4.1.8 using the following command to avoid some pmix-related error.
+
+```bash
+./configure --prefix=$HOME/local/openmpi-4.1.8 CC=nvc FC=nvfortran CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-shared --enable-static --enable-heterogeneous --enable-openib-rdmacm-ibaddr --with-cuda="$CUDA_DIR" --with-pmix="/usr" --with-pmix-libdir="/usr/lib64"
+
+make -j
+
+make install
+
+cp -r $HOME/local/openmpi-4.1.8 $SCRATCH/local
+```
