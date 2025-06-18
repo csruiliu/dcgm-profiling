@@ -72,9 +72,31 @@ export LD_LIBRARY_PATH="$OPENMPI_DIR/lib:$LD_LIBRARY_PATH"
 export CPATH="$OPENMPI_DIR/include:$CPATH"
 ```
 
+**OpenBLAS**
+
+Download OpenBLAS-0.3.29 source codes from [github](https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.29/OpenBLAS-0.3.29.tar.gz), taking 0.3.29 as an example,
+
+```bash
+wget https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.29/OpenBLAS-0.3.29.tar.gz
+
+tar -xvf OpenBLAS-0.3.29.tar.gz
+
+cd <uncompressed-folder>
+
+make -j8 USE_OPENMP=1 INTERFACE64=1 DYNAMIC_ARCH=1 CFLAGS="-O3 -fopenmp"
+
+make install PREFIX=$HOME/local/openblas-0.3.29
+
+# adding the following environmet variable to ~/.bashrc
+export OPENBLAS_DIR="$SCRATCH/local/openblas-0.3.29"
+export PATH="$OPENBLAS_DIR/bin:$PATH"
+export LD_LIBRARY_PATH="$OPENBLAS_DIR/lib:$LD_LIBRARY_PATH"
+export CPATH="$OPENBLAS_DIR/include:$CPATH"
+```
+
 **HDF5**
 
-Downloading HDF5 source codes from [github](https://github.com/HDFGroup/hdf5/tags), taking 1.14.3 as an example,
+Downloading HDF5 source codes from [github](https://github.com/HDFGroup/hdf5/releases/download/hdf5-1_14_3/hdf5-1_14_3.tar.gz), taking 1.14.3 as an example,
 
 ```bash
 wget https://github.com/HDFGroup/hdf5/releases/download/hdf5-1_14_3/hdf5-1_14_3.tar.gz
@@ -85,7 +107,7 @@ cd <uncompressed-folder>
 
 # run ./configure --help for more details
 # rename the uncompressed folder if its name is hdf5-1.14.3
-./configure --prefix=$HOME/local/hdf5-1.14.3 CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-fortran --enable-shared --enable-parallel --enable-optimization=none
+./configure --prefix=$HOME/local/hdf5-1.14.3 CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-fortran --enable-shared --enable-parallel 
 # run make as as many cores as possible
 make -j
 # install all files to prefix path, which is $HOME/local/hdf5-1.14.3
@@ -175,7 +197,7 @@ mkdir build
 
 cd build
 
-cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX=$HOME/local/scalapack-2.2.2 -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON ..
+cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX="$HOME/local/scalapack-2.2.2" -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" -DLAPACK_LIBRARIES="$LAPACK_DIR/lib64/liblapack.so" ..
 
 make -j
 
