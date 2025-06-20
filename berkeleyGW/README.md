@@ -56,7 +56,7 @@ mv openmpi-4.1.6 openmpi-4.1.6-src
 
 cd openmpi-4.1.6-src
 
-./configure --prefix=$HOME/local/openmpi-4.1.6 CC=nvc FC=nvfortran CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-static --enable-heterogeneous
+./configure --prefix="$HOME/local/openmpi-4.1.6" CC=nvc FC=nvfortran CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-static --enable-heterogeneous
 
 make -j all
 
@@ -107,7 +107,7 @@ cd <uncompressed-folder>
 
 # run ./configure --help for more details
 # rename the uncompressed folder if its name is hdf5-1.14.3
-./configure --prefix=$HOME/local/hdf5-1.14.3 CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-fortran --enable-shared --enable-parallel 
+./configure --prefix="$HOME/local/hdf5-1.14.3" CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FCFLAGS="-tp x86-64-v3 -fPIC" --enable-fortran --enable-shared --enable-parallel 
 # run make as as many cores as possible
 make -j
 # install all files to prefix path, which is $HOME/local/hdf5-1.14.3
@@ -137,7 +137,7 @@ mv fftw-3.3.10 fftw-3.3.10-src
 cd fftw-3.3.10-src
 
 # rename the uncompressed folder if its name is fftw-3.3.10
-./configure --prefix=$HOME/local/fftw-3.3.10 CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FFLAGS="-tp x86-64-v3 -fPIC" --enable-shared --enable-openmp --enable-threads --enable-mpi
+./configure --prefix="$HOME/local/fftw-3.3.10" CC=mpicc FC=mpifort CFLAGS="-tp x86-64-v3 -fPIC" FFLAGS="-tp x86-64-v3 -fPIC" --enable-shared --enable-openmp --enable-threads --enable-mpi
 
 make -j
 
@@ -168,7 +168,7 @@ mkdir build
 
 cd build
 
-cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX=$HOME/local/lapack-3.12.1 -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON ..
+cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX="$HOME/local/lapack-3.12.1" -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON ..
 
 make -j
 
