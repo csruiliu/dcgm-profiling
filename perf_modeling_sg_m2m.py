@@ -209,8 +209,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
         t_total_target_list_finish = t_total_target_list[:finish_idx]
     else:
         t_total_target_list_finish = t_total_target_list
- 
-    print(sum(t_total_target_list_finish))
+    
+    print(f"Estimate Runtime On Target Hardware: {sum(t_total_target_list_finish):0.2f}")
 
 
 def main():
@@ -251,6 +251,7 @@ def main():
     
     if target_gpu_arch is not None:
         perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, ref_gpu_arch, target_gpu_arch)
+
 
 if __name__=="__main__":
     main()
