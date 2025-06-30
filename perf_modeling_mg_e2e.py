@@ -53,7 +53,8 @@ def process_file(num_gpu, file_path, metric_names):
 # Function to plot dataframe
 def perf_modeling_per_gpu(df, metrics, finish_idx, sample_intv, hw_pcie_gb, hw_nvlink_gb):
     t_total_list = list()
-    
+    t_othernode_list = list()
+
     for row in df.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
         # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
@@ -137,6 +138,7 @@ def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_
 
 def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec):
     t_total_target_list = list()
+    t_otherNode_target_list = list()
     
     for row in df.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
@@ -178,16 +180,20 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
         
         t_otherNode_target = t_otherNode_ref
 
+        t_otherNode_target_list.append(t_otherNode_target)
+
         t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_target_list.append(t_total_target)  
     
     if finish_idx < len(t_total_target_list):
         t_total_list_finish = t_total_target_list[:finish_idx]
+        t_otherNode_list_finish = t_otherNode_target_list[:finish_idx]
     else:
         t_total_list_finish = t_total_target_list
+        t_otherNode_list_finish = t_otherNode_target_list
 
-    return t_total_list_finish
+    return t_total_list_finish, t_otherNode_list_finish
 
 
 def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch):
@@ -227,10 +233,13 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
     target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
 
     t_total_dict = dict()
+    t_othernode_dict = dict()
+
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_totals = pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec)
+            t_totals, t_othernodes = pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec)
             t_total_dict[f"GPU{i}"] = t_totals
+            t_othernode_dict[f"GPU{i}"] = t_othernodes
         else:
             raise ValueError("The total time list is empty")
 
@@ -246,8 +255,9 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
     agg_samples = agg_interval_ms // sample_interval_ms
 
     # Transpose the lists and take max of every `agg_samples` samples
-    max_list = []
-    
+    max_value_list = []
+    max_index_list = []
+
     for start in range(0, num_rows, agg_samples):
         end = min(start + agg_samples, num_rows)
         # For each row in this window, find the max across GPUs, then find the max in the window
@@ -255,10 +265,25 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
             gpu: sum(t_total_dict[gpu][row_idx] for row_idx in range(start, end))
             for gpu in t_total_dict
         }
-        window_max = max(agg_time_gpus.values())
-        max_list.append(window_max)
 
-    print(sum(max_list))
+        # window_max = max(agg_time_gpus.values())
+        max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
+        max_value_list.append(max_value)
+        max_index_list.append(max_index)
+    
+    for start in range(0, num_rows, agg_samples):
+        end = min(start + agg_samples, num_rows)
+        # For each row in this window, find the max across GPUs, then find the max in the window
+        agg_time_gpus = {
+            gpu: sum(t_othernode_dict[gpu][row_idx] for row_idx in range(start, end))
+            for gpu in t_othernode_dict
+        }
+
+    total_othernode_time = 0
+    for idx, val in enumerate(max_index_list):
+        total_othernode_time += t_othernode_dict[f"GPU{val}"][idx]
+    
+    print(sum(max_value_list), total_othernode_time)
 
 
 def main():
