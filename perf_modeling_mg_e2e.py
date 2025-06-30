@@ -133,7 +133,7 @@ def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_
         window_max = max(agg_time_gpus.values())
         max_list.append(window_max)
 
-    print(sum(max_list))
+    print(f"Estimate Runtime On Reference Hardware: {sum(max_list):.2f}")
 
 
 def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec):
@@ -283,7 +283,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
     for idx, val in enumerate(max_index_list):
         total_othernode_time += t_othernode_dict[f"GPU{val}"][idx]
     
-    print(sum(max_value_list), total_othernode_time)
+    print(f"Estimate Runtime On Target Hardware: {sum(max_value_list):.2f}")
+    print(f"Estimate T_Othernode Time: {total_othernode_time:.2f}")
 
 
 def main():
