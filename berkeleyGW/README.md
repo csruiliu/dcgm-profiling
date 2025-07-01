@@ -5,10 +5,10 @@
 Following the instructions on the [website](https://gitlab.com/NERSC/N10-benchmarks/berkeleygw-workflow) to compile BerkeleyGW on [Permutter](https://docs.nersc.gov/systems/perlmutter/architecture), except for the module loading--using the following instead.
 
 ```bash
-module swap PrgEnv-gnu PrgEnv-nvhpc
-module load cray-hdf5-parallel/1.12.2.9
-module load cray-fftw/3.3.10.6
-module load cray-libsci/23.12.5
+module swap PrgEnv-gnu PrgEnv-nvidia/8.5.0
+module load cray-hdf5-parallel/1.14.3.1
+module load cray-fftw/3.3.10.8
+module load cray-libsci/24.07.0
 module load python 
 ```
 
