@@ -4,7 +4,7 @@
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=14
+#SBATCH --cpus-per-task=32
 #SBATCH -A nstaff
 #SBATCH -J bgw_sig_Si214
 #SBATCH -C gpu&hbm40g
@@ -42,9 +42,9 @@ ln -sfn  ${Si214_WFN_folder}/eps0mat.h5   .
 
 
 ulimit -s unlimited
-export OMP_NUM_THREADS=14
-#export OMP_PROC_BIND=close
-#export OMP_PLACES=cores
+export OMP_NUM_THREADS=16
+export OMP_PROC_BIND=true
+export OMP_PLACES=threads
 #export OMP_MAX_ACTIVE_LEVELS=1
 #export OMP_WAIT_POLICY=active
 #export OMP_DYNAMIC=false

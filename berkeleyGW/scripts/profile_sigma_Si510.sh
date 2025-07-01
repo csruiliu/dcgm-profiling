@@ -36,6 +36,7 @@ ln -sfn  ${Si510_WFN_folder}/eps0mat.h5   .
 ulimit -s unlimited
 export OMP_PROC_BIND=true
 export OMP_PLACES=threads
+
 export HDF5_USE_FILE_LOCKING=FALSE
 export BGW_HDF5_WRITE_REDIST=1
 export BGW_WFN_HDF5_INDEPENDENT=1
