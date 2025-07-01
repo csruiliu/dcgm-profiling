@@ -40,5 +40,7 @@ Si998_Benchmark_folder_=$N10_BGW_WORKFLOW/benchmark/reference_Si998
 Si2742_Benchmark_folder_Small=$N10_BGW_WORKFLOW/benchmark/target_Si2742
 
 #any modules that should be loaded at runtime
-# module swap PrgEnv-gnu PrgEnv-nvhpc
-module load PrgEnv-nvhpc
+module swap PrgEnv-gnu PrgEnv-nvidia
+module load cray-hdf5-parallel
+module load cray-fftw
+module load cray-libsci
