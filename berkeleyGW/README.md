@@ -45,6 +45,18 @@ According to the offical [website](http://manual.berkeleygw.org/2.0/compilation)
 
 **OpenMPI**
 
+**Using the OpenMPI from /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/comm_libs/12.3/openmpi4/latest**
+
+**No need to instal OpenMPI, using the following environment variables**
+
+```bash
+export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
+export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/latest"
+export PATH="$OPENMPI_DIR/bin:$PATH"
+export LD_LIBRARY_PATH="$OPENMPI_DIR/lib:$LD_LIBRARY_PATH"
+export CPATH="$OPENMPI_DIR/include:$CPATH"
+```
+
 Downloading OpenMPI source codes from [github](https://www-lb.open-mpi.org/software/ompi), taking 4.1.6 as an example,
 
 ```bash
