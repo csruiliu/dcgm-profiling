@@ -74,6 +74,18 @@ export CPATH="$OPENMPI_DIR/include:$CPATH"
 
 **OpenBLAS**
 
+**Using the libs from /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/compilers/lib**
+
+**No need to instal OpenBLAS, using the following environment variables**
+
+```bash
+export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
+export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
+
+export LD_LIBRARY_PATH="$NVHPCLIB_DIR:$LD_LIBRARY_PATH"
+```
+
+
 Download OpenBLAS-0.3.29 source codes from [github](https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.29/OpenBLAS-0.3.29.tar.gz), taking 0.3.29 as an example,
 
 ```bash
@@ -155,6 +167,17 @@ export CPATH="$FFTW_DIR/include:$CPATH"
 
 **LAPACK**
 
+**Using the libs from /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/compilers/lib**
+
+**No need to instal LAPACK, using the following environment variables**
+
+```bash
+export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
+export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
+
+export LD_LIBRARY_PATH="$NVHPCLIB_DIR:$LD_LIBRARY_PATH"
+```
+
 Downloading LAPACK source codes from their [website](https://www.netlib.org/lapack), taking 3.12.1 as an example,
 
 ```bash
@@ -191,13 +214,13 @@ wget https://github.com/Reference-ScaLAPACK/scalapack/archive/refs/tags/v2.2.2.t
 
 tar -xvf v2.2.2.tar.gz
 
-cd <uncompressed-folder>
+mv scalapack-2.2.2 scalapack-2.2.2-src
 
 mkdir build
 
 cd build
 
-cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX="$HOME/local/scalapack-2.2.2" -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" -DBUILD_SHARED_LIBS=ON -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" -DLAPACK_LIBRARIES="$LAPACK_DIR/lib64/liblapack.so" ..
+cmake -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX="$HOME/local/scalapack-2.2.2" -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" -DBUILD_SHARED_LIBS=ON -DBLAS_LIBRARIES="$NVHPCLIB_DIR/libblas_lp64.so" -DLAPACK_LIBRARIES="$NVHPCLIB_DIR/liblapack_ilp64.so" ..
 
 make -j
 
@@ -234,22 +257,22 @@ export NVSHMEM_DIR="$NVHPC_DIR/comm_libs/nvshmem"
 export MATHLIB_DIR="$NVHPC_DIR/math_libs"
 export NV_COMPILER_DIR="$NVHPC_DIR/compilers"
 
-export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
+#export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
+export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/latest"
 export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3"
 export FFTW_DIR="$SCRATCH/local/fftw-3.3.10"
-export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
+#export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
 export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2"
+export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
 
 export MANPATH="$NVHPC_DIR/compilers/man:$MANPATH"
 
-export PATH="$NVHPC_COMPILER_EXTRA_DIR/bin:$NVHPC_COMPILER_DIR/bin:$CUDA_DIR/bin:$OPENMPI_DIR/bin:$LAPACK_DIR/bin:$HDF5_DIR/bin:$FFTW_DIR/bin:$PATH"
+export PATH="$NVHPC_COMPILER_EXTRA_DIR/bin:$NVHPC_COMPILER_DIR/bin:$CUDA_DIR/bin:$OPENMPI_DIR/bin:$HDF5_DIR/bin:$FFTW_DIR/bin:$PATH"
 
-export LD_LIBRARY_PATH="$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_DIR/lib:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$OPENMPI_DIR/lib:$SCALAPACK_DIR/lib:$LAPACK_DIR/lib64:$HDF5_DIR/lib:$FFTW_DIR/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_DIR/lib:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$OPENMPI_DIR/lib:$SCALAPACK_DIR/lib:$HDF5_DIR/lib:$FFTW_DIR/lib:$NVHPCLIB_DIR:$LD_LIBRARY_PATH"
 
 export CPATH="$NVHPC_DIR/compilers/extras/qd/include/qd:$NVSHMEM_DIR/include:$NCCL_DIR/include:$MATHLIB_DIR/include:$OPENMPI_DIR/include:$HDF5_DIR/include:$FFTW_DIR/include:$CPATH"
 
-export OPAL_PREFIX=$OPENMPI_DIR
-export OMPI_MCA_orte_keep_fqdn_hostnames=1
 ```
 
 ## Berkeley Workflow
