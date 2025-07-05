@@ -120,7 +120,28 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     print(time_sum_segments_final)
 
 
-def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, ref_gpu_arch, target_gpu_arch):
+def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref):
+
+    balance_ref = ref_gpu_spec['fp64'] * 1000 / ref_gpu_spec['mem_bw']
+
+    balance_target = target_gpu_spec['fp64'] * 1000 / target_gpu_spec['mem_bw']
+
+    t_intensity_balance = t_flop_ref * ref_gpu_spec['fp64'] * 1000 / (t_dram_ref * ref_gpu_spec['mem_bw'])
+
+    bound_ref = "compute" if t_intensity_balance > balance_ref else "memory"
+
+    bound_target = "compute" if t_intensity_balance > balance_target else "memory"
+
+    if bound_ref == bound_target:
+        return 1
+    elif bound_ref != bound_target and bound_target == "memory":
+        return 2
+    elif bound_ref != bound_target and bound_target == "compute":
+        return 3
+    else:
+        return 0
+
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util_bound_switch, mem_util_bound_switch):
     sample_intv = sample_interval_ms / 1000
     
     # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
@@ -154,13 +175,9 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
     # Get specifications for both reference and target GPUs
     ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
     target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
-
-    # Taking FP64 tensor as general tensor
-    ref_tensor = ref_gpu_spec["ref_fp64_tensor"]
-    target_tensor = target_gpu_spec["target_fp64_tensor"]
     
     t_total_target_list = list()
-    
+
     for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
         # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
@@ -183,13 +200,33 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
 
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
-                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+
+        bound_switch = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref)
+
+        if bound_switch == 1:
+            t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
+                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+            t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
         
-        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
+        elif bound_switch == 2:
+            t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
+                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+            t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"]) * mem_util_bound_switch
         
+        elif bound_switch == 3:
+            t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
+                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"])) * flop_util_bound_switch
+            t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
+        
+        else:
+            raise ValueError("No Bound Switch Code Detected")
+
         t_roofline_target = max(t_flop_target, t_dram_target)
         
         t_otherGPU_target = t_otherGPU_ref
@@ -234,6 +271,10 @@ def main():
                         help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
+    parser.add_argument('-fu', '--flop_util', action='store', type=float, required=True,
+                        help='indicate the estimated flops utlization when bound swtich')
+    parser.add_argument('-mu', '--mem_util', action='store', type=float, required=True,
+                        help='indicate the estimated memory utlization when bound swtich')
     args = parser.parse_args()
 
     dcgm_metric_file = args.dcgm_file
@@ -244,13 +285,15 @@ def main():
     metrics = args.metrics
     ref_gpu_arch = args.ref_gpu_architect
     target_gpu_arch = args.target_gpu_architect
-    
+    flop_util = args.flop_util
+    mem_util = args.mem_util
+
     profiled_df = process_file(dcgm_metric_file, metrics)
     
     perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, ref_gpu_arch)
     
     if target_gpu_arch is not None:
-        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, ref_gpu_arch, target_gpu_arch)
+        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util, mem_util)
 
 
 if __name__=="__main__":
