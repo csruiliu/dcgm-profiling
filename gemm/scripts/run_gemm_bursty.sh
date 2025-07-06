@@ -23,6 +23,6 @@ export DCGM_SAMPLE_RATE=1000
 
 #run the application:
 dcgm_delay=${DCGM_SAMPLE_RATE} \
-srun --cpu_bind=cores --gpu-bind=single:1 ./wrap_dcgmi.sh ./gemm_bursty.x \
+srun --cpu_bind=cores --gpu-bind=single:0 ./wrap_dcgmi.sh ./gemm_bursty.x \
 	> ${RESULTS_DIR}/gemm_bursty-${SLURM_JOBID}.dcgmi
 

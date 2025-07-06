@@ -31,7 +31,7 @@ for prec in D S H; do
 #run the application:
 start=$(date +%s.%N)
 dcgm_delay=${DCGM_SAMPLE_RATE} \
-	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:1 \
+	srun -n 1 -c 1 --cpu_bind=cores -G 1 --gpu-bind=single:0 \
 	./wrap_dcgmi.sh \
 	./gemm.x 16384 100 1.0 1.0 $prec \
 	> ${RESULTS_DIR}/"$prec"gemm-${SLURM_JOBID}.dcgmi
