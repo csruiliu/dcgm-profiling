@@ -6,6 +6,7 @@
 #SBATCH -t 00:05:00
 #SBATCH -A nstaff
 #SBATCH -o ../results/GEMM_INTERLEAVE_%j/GEMM_INTERLEAVE_%j.out
+#SBATCH --exclusive
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1

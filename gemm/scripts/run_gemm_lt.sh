@@ -6,6 +6,7 @@
 #SBATCH -t 00:30:00
 #SBATCH -A nstaff
 #SBATCH -o ../results/GEMM_LT_%j/GEMM_LT_%j.out
+#SBATCH --exclusive
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1
