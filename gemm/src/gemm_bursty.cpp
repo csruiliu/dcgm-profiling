@@ -1,17 +1,15 @@
+#include <stdio.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <chrono>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
+#include <cstdlib>
+#include <cmath>
 
 // Constants
-const int TRANSFER_MATRIX_SIZE = 16384;
-const int GEMM_MATRIX_SIZE = 4096;
+const int TRANSFER_MATRIX_SIZE = 8192;
+const int GEMM_MATRIX_SIZE = 2240;
 const int NUM_MATRICES = 2;
 const double TOTAL_RUNTIME_MS = 60000.0;
-const double PHASE_RUNTIME_MS = 250.0;
 const long long TRANSFER_MATRIX_BYTES = (long long)TRANSFER_MATRIX_SIZE * TRANSFER_MATRIX_SIZE * sizeof(float);
 const long long GEMM_MATRIX_BYTES = (long long)GEMM_MATRIX_SIZE * GEMM_MATRIX_SIZE * sizeof(float);
 const long long FLOPS_PER_GEMM = (2LL * GEMM_MATRIX_SIZE * GEMM_MATRIX_SIZE * GEMM_MATRIX_SIZE) + (3LL * GEMM_MATRIX_SIZE * GEMM_MATRIX_SIZE);
@@ -29,10 +27,16 @@ struct ExecutionPhase {
 
 // Define your execution patterns here
 ExecutionPhase EXEC_PATTERN[] = {
-    {OP_TRANSFER, 250.0},
-    {OP_COMPUTE, 250.0},
-    {OP_TRANSFER, 250.0},
-    {OP_COMPUTE, 250.0}
+    {OP_TRANSFER, 100.0},
+    {OP_COMPUTE, 100.0},
+    {OP_TRANSFER, 100.0},
+    {OP_COMPUTE, 100.0},
+    {OP_TRANSFER, 100.0},
+    {OP_COMPUTE, 100.0},
+    {OP_TRANSFER, 100.0},
+    {OP_COMPUTE, 100.0},
+    {OP_TRANSFER, 100.0},
+    {OP_COMPUTE, 100.0},
 };
 
 // Global execution context
@@ -108,19 +112,21 @@ void execute_compute_phase(ExecutionContext* ctx, double duration_ms) {
 }
 
 // Execute a cycle with the given pattern
-void execute_cycle(ExecutionContext* ctx, ExecutionPhase* pattern, int pattern_length) {
+void execute_cycle(ExecutionContext* ctx, ExecutionPhase* pattern, int pattern_length, double cycle_duration) {
     // Reset statistics for this cycle
     ctx->total_transfer_count = 0;
     ctx->total_gemm_count = 0;
     ctx->total_transfer_time = 0.0;
     ctx->total_compute_time = 0.0;
     
-    for (int i = 0; i < pattern_length; i++) {        
+    double exec_start = get_milliseconds();
+    for (int i = 0; i < pattern_length; i++) {
         if (pattern[i].type == OP_TRANSFER) {
             execute_transfer_phase(ctx, pattern[i].duration_ms);
         } else {
             execute_compute_phase(ctx, pattern[i].duration_ms);
         }
+        if ((get_milliseconds() - exec_start) > cycle_duration) break;
     }
 }
 
@@ -153,7 +159,13 @@ int main() {
 
     // Initialize execution context
     ExecutionContext ctx = {0};
-    cublasCreate(&ctx.handle);
+    cublasStatus_t status = cublasCreate(&ctx.handle);
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        printf("ERROR: creating cuBLAS handle\n");
+        return 1;
+    }
+    cublasSetMathMode(ctx.handle, CUBLAS_TF32_TENSOR_OP_MATH);
+    
     ctx.alpha = 1.0f;
     ctx.beta = 0.1f;
 
@@ -211,7 +223,7 @@ int main() {
         double cycle_start = get_milliseconds();
         printf("Cycle %d: ", ++cycle);
         
-        execute_cycle(&ctx, current_pattern, pattern_length);
+        execute_cycle(&ctx, current_pattern, pattern_length, cycle_duration);
         
         double cycle_time = get_milliseconds() - cycle_start;
         

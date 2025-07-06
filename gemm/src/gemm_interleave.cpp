@@ -6,7 +6,7 @@
 #include <cmath>
 
 // Constants
-const int TRANSFER_MATRIX_SIZE = 512;
+const int TRANSFER_MATRIX_SIZE = 808;
 const int GEMM_MATRIX_SIZE = 2048;
 const int NUM_MATRICES = 2;
 const double TOTAL_RUNTIME_MS = 60000.0;
