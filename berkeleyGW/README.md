@@ -12,7 +12,8 @@ module load cray-libsci/24.07.0
 module load python 
 ```
 
-BerkeleyGW has mutiple example makefiles, choose `perlmutter.nersc.gov-nvhpc-openacc.mk` for Permutter
+BerkeleyGW has mutiple example makefiles, choose `perlmutter.nersc.gov-nvhpc-openacc.mk` for Permutter, or just use [pm-arch-gpu.mk](pm-arch-gpu.mk). 
+
 
 ## BerkeleyGW Compilation on Lawrencium
 
