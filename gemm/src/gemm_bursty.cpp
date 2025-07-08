@@ -180,13 +180,13 @@ void execute_pure_gpu_memory_phase(ExecutionContext<T>* ctx, double duration_ms)
     while (memory_timer.elapsed_ms() < duration_ms) {
         switch (operation_type % 3) {
             case 0:
-                // Device-to-device memcpy
+                // matrix to temp memcpy
                 cudaMemcpy(ctx->d_temp_matrix, ctx->d_memory_matrices[matrix_src], 
                            matrix_bytes, cudaMemcpyDeviceToDevice);
                 break;
                                 
             case 1:
-                // Another device-to-device memcpy
+                // temp to matrix memcpy
                 cudaMemcpy(ctx->d_memory_matrices[matrix_dst], ctx->d_temp_matrix, 
                            matrix_bytes, cudaMemcpyDeviceToDevice);
                 break;
