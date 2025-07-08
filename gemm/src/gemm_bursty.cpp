@@ -9,12 +9,10 @@
 #include <vector>
 
 // Constants
-const int NUM_TRANSFER_MATRICES = 2;
+const int NUM_GPU_MEMORY_MATRICES = 4;  // Multiple matrices for GPU memory operations
 const double TOTAL_RUNTIME_MS = 60000.0;
 
 // Precision control - change this type to switch precision
-// 'float' for single precision
-// 'double' for double precision
 using precision_t = float; 
 
 // Helper function to get precision name
@@ -27,7 +25,7 @@ const char* get_precision_name<float>() { return "SINGLE"; }
 template<>
 const char* get_precision_name<double>() { return "DOUBLE"; }
 
-// Timer 
+// Simple but robust timer 
 class Timer {
     std::chrono::steady_clock::time_point start;
 public:
@@ -40,7 +38,7 @@ public:
 
 // Execution pattern configuration
 enum OperationType {
-    OP_TRANSFER,
+    OP_MEMORY_OP,
     OP_COMPUTE
 };
 
@@ -51,59 +49,33 @@ struct ExecutionPhase {
 
 // Define your execution patterns here
 ExecutionPhase EXEC_PATTERN[] = {
-    {OP_TRANSFER, 100.0},
+    {OP_MEMORY_OP, 100.0},
     {OP_COMPUTE, 400.0},
-    {OP_TRANSFER, 100.0},
+    {OP_MEMORY_OP, 100.0},
     {OP_COMPUTE, 400.0},
 };
 
-// Template specializations for CUBLAS operations
-template<typename T>
-cublasStatus_t cublas_gemm(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
-                          int m, int n, int k, const T *alpha,
-                          const T *A, int lda, const T *B, int ldb,
-                          const T *beta, T *C, int ldc);
-
-template<>
-cublasStatus_t cublas_gemm<float>(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
-                                 int m, int n, int k, const float *alpha,
-                                 const float *A, int lda, const float *B, int ldb,
-                                 const float *beta, float *C, int ldc) {
-    return cublasSgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
-}
-
-template<>
-cublasStatus_t cublas_gemm<double>(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
-                                  int m, int n, int k, const double *alpha,
-                                  const double *A, int lda, const double *B, int ldb,
-                                  const double *beta, double *C, int ldc) {
-    return cublasDgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
-}
-
-
-// Execution context
 template<typename T>
 struct ExecutionContext {
-    // Host matrices
-    std::unique_ptr<T*[]> h_transfer_matrices;
-    std::unique_ptr<T[]> h_gemm_matrix;
+    // Pure GPU memory operation matrices
+    int memory_matrix_size;
+    T** d_memory_matrices;  // Multiple matrices for GPU memory operations
+    T* d_temp_matrix;       // Temporary matrix for memory operations
     
-    // Device matrices
-    T *d_transfer_matrix;
-    T *d_gemm_matrixA, *d_gemm_matrixB, *d_gemm_matrixC;
+    // Pure compute matrices (separate from memory operation matrices)
+    int compute_matrix_size;
+    T* d_compute_matrixA;
+    T* d_compute_matrixB;
+    T* d_compute_matrixC;
     
-    cublasHandle_t handle;
     T alpha, beta;
-    
-    // Statistics
-    int total_transfer_count;
-    int total_gemm_count;
-    
-    //Constant
-    int transfer_matrix_size;
-    int gemm_matrix_size;
 
-    ExecutionContext() : total_transfer_count(0), total_gemm_count(0) {
+    // Counters
+    int total_memory_ops_count;
+    int total_compute_count;
+
+    cublasHandle_t handle;
+    ExecutionContext() : total_memory_ops_count(0), total_compute_count(0) {
         alpha = T(1.0);
         beta = T(0.1);
     }
@@ -113,67 +85,37 @@ template<typename T>
 void generate_random_matrix(T* matrix, int size, int seed) {
     srand(seed);
     for (int i = 0; i < size * size; i++) {
-        matrix[i] = static_cast<T>(rand()) / static_cast<T>(RAND_MAX);
+        matrix[i] = static_cast<T>(rand()) / RAND_MAX;
     }
 }
 
-// Template functions for execution phases
+// Specializations for cuBLAS GEMM
 template<typename T>
-void execute_transfer_phase(ExecutionContext<T>* ctx, double duration_ms) {
-    Timer transfer_timer;
-    int phase_transfers = 0;
-    int matrix_index = 0;
-    
-    while (transfer_timer.elapsed_ms() < duration_ms) {
-        cudaMemcpy(ctx->d_transfer_matrix, 
-                  ctx->h_transfer_matrices[matrix_index], 
-                  ctx->transfer_matrix_size * ctx->transfer_matrix_size * sizeof(T), 
-                  cudaMemcpyHostToDevice);
+cublasStatus_t cublas_gemm(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+                          int m, int n, int k, const T* alpha,
+                          const T* A, int lda, const T* B, int ldb,
+                          const T* beta, T* C, int ldc);
 
-        phase_transfers++;
-        matrix_index = phase_transfers % NUM_TRANSFER_MATRICES;
-    }
-    ctx->total_transfer_count += phase_transfers;
+template<>
+cublasStatus_t cublas_gemm<float>(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+                                 int m, int n, int k, const float* alpha,
+                                 const float* A, int lda, const float* B, int ldb,
+                                 const float* beta, float* C, int ldc) {
+    return cublasSgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+}
+
+template<>
+cublasStatus_t cublas_gemm<double>(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb,
+                                  int m, int n, int k, const double* alpha,
+                                  const double* A, int lda, const double* B, int ldb,
+                                  const double* beta, double* C, int ldc) {
+    return cublasDgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
 }
 
 template<typename T>
-void execute_compute_phase(ExecutionContext<T>* ctx, double duration_ms) {
-    Timer compute_timer;
-    int phase_gemm = 0;
-    
-    while (compute_timer.elapsed_ms() < duration_ms) {
-        cublas_gemm<T>(ctx->handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                      ctx->gemm_matrix_size, ctx->gemm_matrix_size, ctx->gemm_matrix_size,
-                      &ctx->alpha,
-                      ctx->d_gemm_matrixA, ctx->gemm_matrix_size,
-                      ctx->d_gemm_matrixB, ctx->gemm_matrix_size,
-                      &ctx->beta,
-                      ctx->d_gemm_matrixC, ctx->gemm_matrix_size);
-        cudaDeviceSynchronize();
-        phase_gemm++;
-    }
-    
-    ctx->total_gemm_count += phase_gemm;
-}
-
-template<typename T>
-void execute_cycle(ExecutionContext<T>* ctx, ExecutionPhase* pattern, int pattern_length, double cycle_duration) {
-    ctx->total_transfer_count = 0;
-    ctx->total_gemm_count = 0;
-    
-    for (int i = 0; i < pattern_length; i++) {
-        if (pattern[i].type == OP_TRANSFER) {
-            execute_transfer_phase<T>(ctx, pattern[i].duration_ms);
-        } else {
-            execute_compute_phase<T>(ctx, pattern[i].duration_ms);
-        }
-    }
-}
-
-template<typename T>
-bool initialize_context(ExecutionContext<T>& ctx, int transfer_matrix_size, int gemm_matrix_size, size_t transfer_matrix_bytes, size_t gemm_matrix_bytes) {
-    ctx.transfer_matrix_size = transfer_matrix_size;
-    ctx.gemm_matrix_size = gemm_matrix_size;
+bool initialize_context(ExecutionContext<T>& ctx, int memory_matrix_size, int compute_matrix_size, size_t memory_matrix_bytes, size_t compute_matrix_bytes) {
+    ctx.memory_matrix_size = memory_matrix_size;
+    ctx.compute_matrix_size = compute_matrix_size;
     
     // Create cuBLAS handle
     cublasStatus_t status = cublasCreate(&ctx.handle);
@@ -183,96 +125,177 @@ bool initialize_context(ExecutionContext<T>& ctx, int transfer_matrix_size, int 
     }
     cublasSetMathMode(ctx.handle, CUBLAS_DEFAULT_MATH);
 
-    // Allocate host memory for transfer matrices
-    ctx.h_transfer_matrices = std::make_unique<T*[]>(NUM_TRANSFER_MATRICES);
-    for (int i = 0; i < NUM_TRANSFER_MATRICES; i++) {
-        ctx.h_transfer_matrices[i] = new T[transfer_matrix_size * transfer_matrix_size];
-        generate_random_matrix(ctx.h_transfer_matrices[i], transfer_matrix_size, i * 1000);
+    // Allocate GPU memory for memory bandwidth operations
+    ctx.d_memory_matrices = new T*[NUM_GPU_MEMORY_MATRICES];
+    for (int i = 0; i < NUM_GPU_MEMORY_MATRICES; i++) {
+        cudaMalloc(&ctx.d_memory_matrices[i], memory_matrix_bytes);
+        
+        // Initialize with some data
+        T* h_temp = new T[memory_matrix_size * memory_matrix_size];
+        generate_random_matrix(h_temp, memory_matrix_size, i * 1000);
+        cudaMemcpy(ctx.d_memory_matrices[i], h_temp, memory_matrix_bytes, cudaMemcpyHostToDevice);
+        delete[] h_temp;
     }
     
-    // Allocate and initialize GEMM matrix
-    ctx.h_gemm_matrix = std::make_unique<T[]>(gemm_matrix_size * gemm_matrix_size);    
-    generate_random_matrix(ctx.h_gemm_matrix.get(), gemm_matrix_size, 12345);
-
-    // Check if we have enough memory before proceeding
-    printf("Each transfer matrix requires %.2f GB\n", transfer_matrix_bytes / (1000.0 * 1000.0 * 1000.0));
-    printf("Total host memory for transfer matrices: %.2f GB\n", NUM_TRANSFER_MATRICES * gemm_matrix_bytes / (1000.0 * 1000.0 * 1000.0));
-    size_t free_mem, total_mem;
-    cudaMemGetInfo(&free_mem, &total_mem);
-
-    // Only one transfer matrix needed
-    size_t required_gpu_mem = transfer_matrix_bytes + 3 * gemm_matrix_bytes; 
-    printf("Required GPU memory Allocation: %.2f GB, Available: %.2f GB\n", 
-           required_gpu_mem / (1000.0 * 1000.0 * 1000.0),
-           free_mem / (1000.0 * 1000.0 * 1000.0));
+    // Allocate temporary matrix for memory operations
+    cudaMalloc(&ctx.d_temp_matrix, memory_matrix_bytes);
     
-    if (required_gpu_mem > free_mem) {
-        printf("Error: Insufficient GPU memory!\n");
-        return false;
-    }
-
-    // Allocate device matrices
-    cudaMalloc(&ctx.d_transfer_matrix, transfer_matrix_bytes);
-    cudaMalloc(&ctx.d_gemm_matrixA, gemm_matrix_bytes);
-    cudaMalloc(&ctx.d_gemm_matrixB, gemm_matrix_bytes);
-    cudaMalloc(&ctx.d_gemm_matrixC, gemm_matrix_bytes);
+    // Allocate GPU memory for pure compute operations (separate matrices)
+    cudaMalloc(&ctx.d_compute_matrixA, compute_matrix_bytes);
+    cudaMalloc(&ctx.d_compute_matrixB, compute_matrix_bytes);
+    cudaMalloc(&ctx.d_compute_matrixC, compute_matrix_bytes);
     
-    // Initialize GEMM matrices
-    cudaMemcpy(ctx.d_gemm_matrixA, ctx.h_gemm_matrix.get(), gemm_matrix_bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(ctx.d_gemm_matrixB, ctx.h_gemm_matrix.get(), gemm_matrix_bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(ctx.d_gemm_matrixC, ctx.h_gemm_matrix.get(), gemm_matrix_bytes, cudaMemcpyHostToDevice);
+    // Initialize compute matrices
+    T* h_compute_matrix = new T[compute_matrix_size * compute_matrix_size];
+    generate_random_matrix(h_compute_matrix, compute_matrix_size, 12345);
+    cudaMemcpy(ctx.d_compute_matrixA, h_compute_matrix, compute_matrix_bytes, cudaMemcpyHostToDevice);
+    
+    generate_random_matrix(h_compute_matrix, compute_matrix_size, 54321);
+    cudaMemcpy(ctx.d_compute_matrixB, h_compute_matrix, compute_matrix_bytes, cudaMemcpyHostToDevice);
+    
+    // Initialize result matrix to zeros
+    cudaMemset(ctx.d_compute_matrixC, 0, compute_matrix_bytes);
+    
+    delete[] h_compute_matrix;
+    
+    printf("Initialized GPU memory matrices: %d x %d (%zu bytes each)\n", 
+           memory_matrix_size, memory_matrix_size, memory_matrix_bytes);
+    printf("Initialized compute matrices: %d x %d (%zu bytes each)\n", 
+           compute_matrix_size, compute_matrix_size, compute_matrix_bytes);
     
     return true;
 }
 
 template<typename T>
-void cleanup_context(ExecutionContext<T>& ctx) {
-    for (int i = 0; i < NUM_TRANSFER_MATRICES; i++) {
-        delete[] ctx.h_transfer_matrices[i];
+void execute_pure_gpu_memory_phase(ExecutionContext<T>* ctx, double duration_ms) {
+    Timer memory_timer;
+    int phase_memory_ops = 0;
+    int matrix_src = 0, matrix_dst = 1;
+    int operation_type = 0;
+    
+    const size_t matrix_bytes = ctx->memory_matrix_size * ctx->memory_matrix_size * sizeof(T);
+    
+    printf("  Pure GPU Memory Phase: zero-computation memory operations for %.0fms\n", duration_ms);
+    
+    while (memory_timer.elapsed_ms() < duration_ms) {
+        switch (operation_type % 3) {
+            case 0:
+                // Device-to-device memcpy
+                cudaMemcpy(ctx->d_temp_matrix, ctx->d_memory_matrices[matrix_src], 
+                           matrix_bytes, cudaMemcpyDeviceToDevice);
+                break;
+                                
+            case 1:
+                // Another device-to-device memcpy
+                cudaMemcpy(ctx->d_memory_matrices[matrix_dst], ctx->d_temp_matrix, 
+                           matrix_bytes, cudaMemcpyDeviceToDevice);
+                break;
+                
+            case 2:
+                // Direct matrix-to-matrix copy
+                cudaMemcpy(ctx->d_memory_matrices[matrix_dst], ctx->d_memory_matrices[matrix_src], 
+                           matrix_bytes, cudaMemcpyDeviceToDevice);
+                break;
+        }
+        
+        phase_memory_ops++;
+        operation_type++;
+        matrix_src = (matrix_src + 1) % NUM_GPU_MEMORY_MATRICES;
+        matrix_dst = (matrix_dst + 1) % NUM_GPU_MEMORY_MATRICES;
     }
     
-    cudaFree(ctx.d_transfer_matrix);
-    cudaFree(ctx.d_gemm_matrixA);
-    cudaFree(ctx.d_gemm_matrixB);
-    cudaFree(ctx.d_gemm_matrixC);
+    ctx->total_memory_ops_count += phase_memory_ops;
+    printf("    Completed %d zero-computation memory operations\n", phase_memory_ops);
+}
+
+template<typename T>
+void execute_pure_compute_phase(ExecutionContext<T>* ctx, double duration_ms) {
+    Timer compute_timer;
+    int phase_compute = 0;
+    
+    printf("  Pure Compute Phase: performing GEMM operations for %.0fms\n", duration_ms);
+    
+    while (compute_timer.elapsed_ms() < duration_ms) {
+        // Pure GEMM computation - no memory transfers, just computation
+        cublas_gemm<T>(ctx->handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                      ctx->compute_matrix_size, ctx->compute_matrix_size, ctx->compute_matrix_size,
+                      &ctx->alpha,
+                      ctx->d_compute_matrixA, ctx->compute_matrix_size,
+                      ctx->d_compute_matrixB, ctx->compute_matrix_size,
+                      &ctx->beta,
+                      ctx->d_compute_matrixC, ctx->compute_matrix_size);
+        
+        cudaDeviceSynchronize();
+        phase_compute++;
+    }
+    
+    ctx->total_compute_count += phase_compute;
+    printf("    Completed %d GEMM operations\n", phase_compute);
+}
+
+template<typename T>
+void execute_cycle(ExecutionContext<T>* ctx, ExecutionPhase* pattern, int pattern_length) {
+    ctx->total_memory_ops_count = 0;
+    ctx->total_compute_count = 0;
+    
+    for (int i = 0; i < pattern_length; i++) {
+        if (pattern[i].type == OP_MEMORY_OP) {
+            execute_pure_gpu_memory_phase<T>(ctx, pattern[i].duration_ms);
+        } else {
+            execute_pure_compute_phase<T>(ctx, pattern[i].duration_ms);
+        }
+    }
+}
+
+template<typename T>
+void cleanup_context(ExecutionContext<T>& ctx) {
+    for (int i = 0; i < NUM_GPU_MEMORY_MATRICES; i++) {
+        cudaFree(ctx.d_memory_matrices[i]);
+    }
+    delete[] ctx.d_memory_matrices;
+    
+    cudaFree(ctx.d_temp_matrix);
+    cudaFree(ctx.d_compute_matrixA);
+    cudaFree(ctx.d_compute_matrixB);
+    cudaFree(ctx.d_compute_matrixC);
     cublasDestroy(ctx.handle);
 }
 
 template<typename T>
-void bursty_execution(int transfer_matrix_size, int gemm_matrix_size) {
+void bursty_execution(int memory_matrix_size, int compute_matrix_size) {
+    // Preparation
     Timer timer;
     
-    printf("Using %s precision GEMM operations\n", get_precision_name<precision_t>());
+    printf("Using %s precision operations\n", get_precision_name<T>());
 
-    const size_t transfer_matrix_bytes = transfer_matrix_size * transfer_matrix_size * sizeof(T);
-    const size_t gemm_matrix_bytes = gemm_matrix_size * gemm_matrix_size * sizeof(T);
-    const long long FLOPS_PER_GEMM = (2LL * gemm_matrix_size * gemm_matrix_size * gemm_matrix_size) + (3LL * gemm_matrix_size * gemm_matrix_size);
+    const size_t memory_matrix_bytes = memory_matrix_size * memory_matrix_size * sizeof(T);
+    const size_t compute_matrix_bytes = compute_matrix_size * compute_matrix_size * sizeof(T);
+    const long long FLOPS_PER_GEMM = (2LL * compute_matrix_size * compute_matrix_size * compute_matrix_size) + 
+                                     (3LL * compute_matrix_size * compute_matrix_size);
 
     // Choose your execution pattern here
     ExecutionPhase* current_pattern = EXEC_PATTERN;
     int pattern_length = sizeof(EXEC_PATTERN) / sizeof(ExecutionPhase);
-    
+
     printf("Using execution pattern with %d phases:\n", pattern_length);
     for (int i = 0; i < pattern_length; i++) {
         printf("  Phase %d: %s (%.0fms)\n", i + 1,
-               current_pattern[i].type == OP_TRANSFER ? "Transfer" : "Compute",
+               current_pattern[i].type == OP_MEMORY_OP ? "Pure GPU Memory Ops" : "Pure Compute",
                current_pattern[i].duration_ms);
     }
     printf("\n");
 
-    // Calculate cycle duration
-    double cycle_duration = 0.0;
+    ExecutionContext<T> ctx;
+    if (!initialize_context(ctx, memory_matrix_size, compute_matrix_size, memory_matrix_bytes, compute_matrix_bytes)) {
+        printf("Failed to initialize execution context\n");
+        return;
+    }
+
+    double cycle_duration = 0;
     for (int i = 0; i < pattern_length; i++) {
         cycle_duration += current_pattern[i].duration_ms;
     }
-    printf("Total predefined cycle duration: %.0fms\n", cycle_duration);    
 
-    // Initialize execution context
-    ExecutionContext<precision_t> ctx;
-    if (!initialize_context(ctx, transfer_matrix_size, gemm_matrix_size, transfer_matrix_bytes, gemm_matrix_bytes)) {
-        return;
-    }
-    
     double preparation_time = timer.elapsed_ms();
     printf("\nTotal preparation time: %.2f seconds\n", preparation_time / 1000.0);
     
@@ -281,22 +304,21 @@ void bursty_execution(int transfer_matrix_size, int gemm_matrix_size) {
 
     int cycle = 0;
     Timer cycle_timer;
+    
     while (timer.elapsed_ms() < TOTAL_RUNTIME_MS) {
         printf("Cycle %d: ", ++cycle);
         cycle_timer.reset();    
-        execute_cycle(&ctx, current_pattern, pattern_length, cycle_duration);
+        execute_cycle(&ctx, current_pattern, pattern_length);
         double cycle_time = cycle_timer.elapsed_ms();
         
         // Calculate actual metrics
-        double total_data_transferred = (double)ctx.total_transfer_count * transfer_matrix_bytes;
-        double total_bandwidth = total_data_transferred / (cycle_time / 1000.0) / (1000.0 * 1000.0 * 1000.0);
-        double total_flops = (double)ctx.total_gemm_count * FLOPS_PER_GEMM;
+        double total_memory_data = (double)ctx.total_memory_ops_count * memory_matrix_bytes;
+        double total_bandwidth = total_memory_data / (cycle_time / 1000.0) / (1000.0 * 1000.0 * 1000.0);
+        double total_flops = (double)ctx.total_compute_count * FLOPS_PER_GEMM;
         double total_gflops = total_flops / (cycle_time / 1000.0) / (1000.0 * 1000.0 * 1000.0);
         
-        printf("Total Data Transfers: %d times, Total GEMM %d ops, BW: %.1f GB/s, Perf: %.1f GFLOPS, Time: %.1fms\n",
-               ctx.total_transfer_count, ctx.total_gemm_count, total_bandwidth, total_gflops, cycle_time);
-    
-        printf("\n");
+        printf("Total GPU Memory Ops: %d, Total Computation: %d, BW: %.1f GB/s, Perf: %.1f GFLOPS, Time: %.1fms\n",
+               ctx.total_memory_ops_count, ctx.total_compute_count, total_bandwidth, total_gflops, cycle_time);
     }
     
     double total_time = timer.elapsed_ms();
@@ -307,28 +329,22 @@ void bursty_execution(int transfer_matrix_size, int gemm_matrix_size) {
 }
 
 int main(int argc, char* argv[]) {
-    // Default values
-    int transfer_matrix_size = 1024;
-    int gemm_matrix_size = 2048;
-
-    // Parse command line arguments
+    int memory_matrix_size = 2048;  // Size for GPU memory bandwidth operations
+    int compute_matrix_size = 1024; // Size for pure compute operations
+    
     if (argc >= 2) {
-        transfer_matrix_size = std::atoi(argv[1]);
+        memory_matrix_size = atoi(argv[1]);
     }
     if (argc >= 3) {
-        gemm_matrix_size = std::atoi(argv[2]);
+        compute_matrix_size = atoi(argv[2]);
     }
     
-    if (transfer_matrix_size <= 0 || gemm_matrix_size <= 0) {
-        printf("Usage: %s [transfer_matrix_size] [gemm_matrix_size]\n", argv[0]);
-        printf("Example: %s 1024 2048\n", argv[0]);
-        return 1;
-    }
-
-    printf("Using transfer matrix size: %d x %d\n", transfer_matrix_size, transfer_matrix_size);
-    printf("Using GEMM matrix size: %d x %d\n", gemm_matrix_size, gemm_matrix_size);
-    printf("Using %s precision GEMM operations\n", get_precision_name<precision_t>());
-
-    bursty_execution<precision_t>(transfer_matrix_size, gemm_matrix_size);    
+    printf("GPU Memory Bandwidth & Pure Compute Benchmark\n");
+    printf("Memory matrix size: %d x %d\n", memory_matrix_size, memory_matrix_size);
+    printf("Compute matrix size: %d x %d\n", compute_matrix_size, compute_matrix_size);
+    printf("==================================================\n");
+    
+    bursty_execution<precision_t>(memory_matrix_size, compute_matrix_size);
+    
     return 0;
 }
