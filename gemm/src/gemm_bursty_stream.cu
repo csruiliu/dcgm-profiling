@@ -12,8 +12,8 @@
 
 // Constants
 static const int NUM_MEMORY_MATRICES = 4;  // Multiple matrices for GPU memory operations
-static const int NUM_MEMORY_STREAMS = 8;
-static const int NUM_COMPUTE_STREAMS = 4;
+static const int NUM_MEMORY_STREAMS = 6;
+static const int NUM_COMPUTE_STREAMS = 6;
 static const double TOTAL_RUNTIME_MS = 60000.0;
 
 // Precision control - change this type to switch precision
@@ -207,18 +207,22 @@ struct ExecutionContext {
     }
 };
 
+long long calculate_gemm_gflops(size_t matrix_size) {
+    // For GEMM: C = A * B, FLOPS = 2 * M * N * K (M=N=K for square matrices)
+    long long flops_per_gemm = 2LL * matrix_size * matrix_size * matrix_size;
+    return flops_per_gemm;
+}
+
 template<typename T>
 bool initialize_context(ExecutionContext<T>& ctx, size_t memory_matrix_size, size_t compute_matrix_size) {
     size_t memory_matrix_bytes = memory_matrix_size * memory_matrix_size * sizeof(T);
     size_t compute_matrix_bytes = compute_matrix_size * compute_matrix_size * sizeof(T);
-    long long flops_per_gemm = (2LL * compute_matrix_size * compute_matrix_size * compute_matrix_size) + 
-                               (3LL * compute_matrix_size * compute_matrix_size);
 
     ctx.memory_matrix_size = memory_matrix_size;
     ctx.compute_matrix_size = compute_matrix_size;
     ctx.memory_matrix_bytes = memory_matrix_bytes;
     ctx.compute_matrix_bytes = compute_matrix_bytes;
-    ctx.flops_per_gemm = flops_per_gemm;
+    ctx.flops_per_gemm = calculate_gemm_gflops(compute_matrix_size);
 
     // Create streams with high priority for memory operations
     for (int i = 0; i < NUM_MEMORY_STREAMS; i++) {
@@ -286,10 +290,10 @@ bool initialize_context(ExecutionContext<T>& ctx, size_t memory_matrix_size, siz
     // Warm up GPU for consistent performance
     cudaDeviceSynchronize();
     
-    printf("Initialized GPU memory matrices: %d x %d (%zu bytes each)\n", 
-           memory_matrix_size, memory_matrix_size, memory_matrix_bytes);
-    printf("Initialized compute matrices: %d x %d (%zu bytes each)\n", 
-           compute_matrix_size, compute_matrix_size, compute_matrix_bytes);
+    printf("Initialized memory matrices: %d x %d x %d (total %.1f MB )\n", 
+           NUM_MEMORY_MATRICES + 1, memory_matrix_size, memory_matrix_size, (double)NUM_MEMORY_MATRICES * memory_matrix_bytes / 1e6);
+    printf("Initialized compute matrices: 3 x %d x %d (total %.1f MB)\n", 
+           compute_matrix_size, compute_matrix_size, (double)3.0 * compute_matrix_bytes / 1e6);
 
     return true;
 }
@@ -303,24 +307,24 @@ void execute_pure_gpu_memory_phase(ExecutionContext<T>* ctx, double duration_ms)
     
     const size_t matrix_elements = ctx->memory_matrix_size * ctx->memory_matrix_size;
     const size_t matrix_bytes = matrix_elements * sizeof(T);
-    const size_t elements_per_stream = matrix_elements / NUM_MEMORY_STREAMS;
-    const size_t elemnets_bytes = matrix_bytes / NUM_MEMORY_STREAMS;
+    // const size_t elements_per_stream = matrix_elements / NUM_MEMORY_STREAMS;
+    // const size_t elemnets_bytes = matrix_bytes / NUM_MEMORY_STREAMS;
     
     while (memory_timer.elapsed_ms() < duration_ms) {
-        operation_type = phase_memory_ops % 6;
+        operation_type = phase_memory_ops % 4;
 
         switch (operation_type) {
             case 0:
-                for (int stream_id = 0; stream_id < NUM_MEMORY_STREAMS; stream_id++) {
+                for (int stream_id = 0; stream_id < NUM_MEMORY_STREAMS && stream_id < NUM_MEMORY_MATRICES - 1; stream_id++) {
                     int src_matrix = (phase_memory_ops + stream_id) % NUM_MEMORY_MATRICES;
                     int dst_matrix = (phase_memory_ops + stream_id + 1) % NUM_MEMORY_MATRICES;
                     
-                    size_t offset_bytes = stream_id * elemnets_bytes;
+                    size_t offset_bytes = stream_id * matrix_bytes;
                     
                     cudaMemcpyAsync(
                         reinterpret_cast<char*>(ctx->d_memory_matrices[dst_matrix]) + offset_bytes,
                         reinterpret_cast<const char*>(ctx->d_memory_matrices[src_matrix]) + offset_bytes,
-                        elemnets_bytes,
+                        matrix_bytes,
                         cudaMemcpyDeviceToDevice,
                         ctx->memory_streams[stream_id]
                     );
@@ -341,15 +345,15 @@ void execute_pure_gpu_memory_phase(ExecutionContext<T>* ctx, double duration_ms)
                 }
                 break;
             case 2:
-                for (int stream_id = 0; stream_id < NUM_MEMORY_STREAMS; stream_id++) {
+                for (int stream_id = 0; stream_id < NUM_MEMORY_STREAMS && stream_id < NUM_MEMORY_MATRICES - 1; stream_id++) {
                     int src_matrix = (phase_memory_ops + stream_id) % NUM_MEMORY_MATRICES;
                     int dst_matrix = (phase_memory_ops + stream_id + 1) % NUM_MEMORY_MATRICES;
-                    size_t offset = stream_id * elements_per_stream;
+                    size_t offset = stream_id * matrix_elements;
                     
                     MemoryOp<T>::launch_copy_operation(
                         ctx->d_memory_matrices[src_matrix] + offset,
                         ctx->d_memory_matrices[dst_matrix] + offset,
-                        elements_per_stream,
+                        matrix_elements,
                         ctx->memory_streams[stream_id]
                     );
                 }
@@ -358,11 +362,11 @@ void execute_pure_gpu_memory_phase(ExecutionContext<T>* ctx, double duration_ms)
                 // Read-write operations
                 for (int stream_id = 0; stream_id < NUM_MEMORY_STREAMS; stream_id++) {
                     int matrix_idx = (phase_memory_ops + stream_id) % NUM_MEMORY_MATRICES;
-                    size_t offset = stream_id * elements_per_stream;
+                    size_t offset = stream_id * matrix_elements;
                     
                     MemoryOp<T>::launch_read_write_operation(
                         ctx->d_memory_matrices[matrix_idx] + offset,
-                        elements_per_stream,
+                        matrix_elements,
                         ctx->memory_streams[stream_id]
                     );
                 }
@@ -370,10 +374,10 @@ void execute_pure_gpu_memory_phase(ExecutionContext<T>* ctx, double duration_ms)
         }
 
         // Synchronize all streams before next iteration
-        for (int i = 0; i < NUM_MEMORY_STREAMS; i++) {
-            cudaStreamSynchronize(ctx->memory_streams[i]);
-        }
-
+        //for (int i = 0; i < NUM_MEMORY_STREAMS; i++) {
+        //   cudaStreamSynchronize(ctx->memory_streams[i]);
+        //}
+        cudaDeviceSynchronize();
         phase_memory_ops++;
     }
 
@@ -406,9 +410,10 @@ void execute_pure_compute_phase(ExecutionContext<T>* ctx, double duration_ms) {
         }
 
         // Synchronize all compute streams
-        for (int i = 0; i < NUM_COMPUTE_STREAMS; i++) {
-            cudaStreamSynchronize(ctx->compute_streams[i]);
-        }
+        //for (int i = 0; i < NUM_COMPUTE_STREAMS; i++) {
+        //    cudaStreamSynchronize(ctx->compute_streams[i]);
+        //}
+        cudaDeviceSynchronize();
         phase_compute_ops++;
     }
     
@@ -504,10 +509,10 @@ void bursty_execution(int memory_matrix_size, int compute_matrix_size) {
         double cycle_time = cycle_timer.elapsed_ms();
 
         // Calculate actual metrics
-        double total_memory_data = (double)ctx.total_memory_ops_count * ctx.memory_matrix_bytes;
-        double total_bandwidth = total_memory_data / (cycle_time / 1000.0) / (1000.0 * 1000.0 * 1000.0);
-        double total_flops = (double)ctx.total_compute_ops_count * ctx.flops_per_gemm;
-        double total_gflops = total_flops / (cycle_time / 1000.0) / (1000.0 * 1000.0 * 1000.0);
+        double total_memory_data = (double)ctx.total_memory_ops_count * ctx.memory_matrix_bytes * 2.0 * NUM_MEMORY_STREAMS;
+        double total_bandwidth = total_memory_data / (cycle_time / 1000.0) / 1e9;
+        double total_flops = (double)ctx.total_compute_ops_count * ctx.flops_per_gemm * NUM_COMPUTE_STREAMS;
+        double total_gflops = total_flops / (cycle_time / 1000.0) / 1e9;
         
         printf("Total GPU Memory Ops: %d, Total Computation: %d, BW: %.1f GB/s, Perf: %.1f GFLOPS, Time: %.1fms\n",
                ctx.total_memory_ops_count, ctx.total_compute_ops_count, total_bandwidth, total_gflops, cycle_time);
@@ -518,6 +523,9 @@ void bursty_execution(int memory_matrix_size, int compute_matrix_size) {
 }
 
 int main(int argc, char* argv[]) {
+    // Set GPU device
+    cudaSetDevice(0);
+
     // Matrix sizes
     int memory_matrix_size = 2048;  // Size for GPU memory bandwidth operations
     int compute_matrix_size = 1024; // Size for pure compute operations
@@ -529,11 +537,9 @@ int main(int argc, char* argv[]) {
         compute_matrix_size = atoi(argv[2]);
     }
     
-    printf("GPU Memory Bandwidth & Pure Compute Benchmark\n");
-    printf("Memory matrix size: %d x %d\n", memory_matrix_size, memory_matrix_size);
-    printf("Compute matrix size: %d x %d\n", compute_matrix_size, compute_matrix_size);
     printf("==================================================\n");
-    
+    printf("GPU Memory Bandwidth & Pure Compute Benchmark\n");
+
     // cudaProfilerStart();
     bursty_execution<precision_t>(memory_matrix_size, compute_matrix_size);
     // cudaProfilerStop();
