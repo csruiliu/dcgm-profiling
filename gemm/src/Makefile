@@ -1,6 +1,6 @@
-#CC = nvc++
+NVCC = nvcc
 CC = CC
-CFLAGS = --std c++11 -O3 -DUSE_CUBLAS -I$(CUDA_HOME)/include
+CFLAGS = --std c++14 -O3 -DUSE_CUBLAS -I$(CUDA_HOME)/include
 LIBS = -L/opt/nvidia/hpc_sdk/Linux_x86_64/23.9/math_libs/lib64 -lcublas
 CFLAGS += -DUSE_MPI
 
@@ -17,6 +17,9 @@ gemm_mpi.x: gemm_mpi.cpp calc_gemm_mpi.cpp Makefile
 
 gemm_bursty.x: gemm_bursty.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_bursty.x gemm_bursty.cpp $(LIBS)
+
+gemm_bursty_stream.x: gemm_bursty_stream.cpp Makefile
+	$(NVCC) $(CFLAGS) -o gemm_bursty_stream.x gemm_bursty_stream.cpp $(LIBS)
 
 gemm_interleave.x: gemm_interleave.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_interleave.x gemm_interleave.cpp $(LIBS)
