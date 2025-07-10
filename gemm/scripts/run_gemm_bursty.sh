@@ -20,10 +20,10 @@ fi
 
 export RESULTS_DIR=../results/GEMM_BURSTY_${SLURM_JOBID}
 
-export DCGM_SAMPLE_RATE=1000
+export DCGM_SAMPLE_RATE=10000
 
 #run the application:
 dcgm_delay=${DCGM_SAMPLE_RATE} \
-srun --cpu_bind=cores --gpu-bind=single:0 ./wrap_dcgmi.sh ./gemm_bursty.x \
+srun --cpu_bind=cores --gpu-bind=single:0 ./wrap_dcgmi.sh ./gemm_bursty.x 4 4096 4096 300000 \
 	> ${RESULTS_DIR}/gemm_bursty-${SLURM_JOBID}.dcgmi
 

@@ -18,8 +18,8 @@ gemm_mpi.x: gemm_mpi.cpp calc_gemm_mpi.cpp Makefile
 gemm_bursty.x: gemm_bursty.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_bursty.x gemm_bursty.cpp $(LIBS)
 
-gemm_bursty_stream.x: gemm_bursty_stream.cpp Makefile
-	$(NVCC) $(CFLAGS) -o gemm_bursty_stream.x gemm_bursty_stream.cpp $(LIBS)
+gemm_bursty_stream.x: gemm_bursty_stream.cu Makefile
+	$(NVCC) $(CFLAGS) -o gemm_bursty_stream.x gemm_bursty_stream.cu $(LIBS)
 
 gemm_interleave.x: gemm_interleave.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_interleave.x gemm_interleave.cpp $(LIBS)
