@@ -45,7 +45,7 @@ def process_file(file_path, metric_names):
     return gpu_dfs  
 
 
-def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks_list, gpu_arch):
+def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
     if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
@@ -86,7 +86,9 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         t_total_list.append(t_total)
 
     # get the sleep and finish index according to the actual sleep time
-    sleep_idx_list = [int(x / sample_interval_ms) for x in sleep_marks_list]
+    if sleep_period_ms != 0:
+        sleep_idx_list = [int(x / sample_interval_ms) for x in sleep_marks]
+    
     finish_idx = int(overall_runtime_ms / sample_interval_ms)
 
     if finish_idx < len(t_total_list):
@@ -94,50 +96,55 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     else:
         t_total_list_finish = t_total_list
 
-    start_mark = 0
+    if sleep_period_ms != 0 and sleep_marks is None:
+        start_mark = 0
+        time_sum_segments = list()
+        for sleep_mark in sleep_idx_list:
+            if sleep_mark <= len(t_total_list_finish):
+                segment_sum = sum(t_total_list_finish[start_mark:sleep_mark])
+                # First segment: keep original sum, others: subtract sleep time
+                if len(time_sum_segments) == 0:
+                    time_sum_segments.append(segment_sum)
+                else:
+                    time_sum_segments.append(segment_sum - sleep_period_ms / 1000)
+                start_mark = sleep_mark
 
-    time_sum_segments = list()
-
-    for sleep_mark in sleep_idx_list:
-        if sleep_mark <= len(t_total_list_finish):
-            segment_sum = sum(t_total_list_finish[start_mark:sleep_mark])
-            # First segment: keep original sum, others: subtract sleep time
-            if len(time_sum_segments) == 0:
-                time_sum_segments.append(segment_sum)
+        # Add remaining elements
+        if start_mark < len(t_total_list_finish):
+            remaining_sum = sum(t_total_list_finish[start_mark:])
+            if len(time_sum_segments) == 0:  # If this is the first (and only) segment
+                time_sum_segments.append(remaining_sum)
             else:
-                time_sum_segments.append(segment_sum - sleep_period_ms / 1000)
-            start_mark = sleep_mark
+                time_sum_segments.append(remaining_sum - sleep_period_ms / 1000)
 
-    # Add remaining elements
-    if start_mark < len(t_total_list_finish):
-        remaining_sum = sum(t_total_list_finish[start_mark:])
-        if len(time_sum_segments) == 0:  # If this is the first (and only) segment
-            time_sum_segments.append(remaining_sum)
-        else:
-            time_sum_segments.append(remaining_sum - sleep_period_ms / 1000)
-    
-    time_sum_segments_final = [0 if x < 0 else x for x in time_sum_segments]
-    print(time_sum_segments_final)
+        time_sum_segments_final = [0 if x < 0 else x for x in time_sum_segments]
+        print(time_sum_segments_final)
+    else:
+        print(f"Estimate Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
+
 
 
 def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref):
 
-    balance_ref = ref_gpu_spec['fp64'] * 1000 / ref_gpu_spec['mem_bw']
+    balance_ref = ref_gpu_spec['ref_fp64'] * 1000 / ref_gpu_spec['ref_mem_bw']
 
-    balance_target = target_gpu_spec['fp64'] * 1000 / target_gpu_spec['mem_bw']
+    balance_target = target_gpu_spec['target_fp64'] * 1000 / target_gpu_spec['target_mem_bw']
 
-    t_intensity_balance = t_flop_ref * ref_gpu_spec['fp64'] * 1000 / (t_dram_ref * ref_gpu_spec['mem_bw'])
-
+    if t_dram_ref != 0:
+        t_intensity_balance = t_flop_ref * ref_gpu_spec['ref_fp64'] * 1000 / (t_dram_ref * ref_gpu_spec['ref_mem_bw'])
+    else:
+        t_intensity_balance = 0
+        
     bound_ref = "compute" if t_intensity_balance > balance_ref else "memory"
 
     bound_target = "compute" if t_intensity_balance > balance_target else "memory"
 
     if bound_ref == bound_target:
-        return 1
+        return 1 # No bound switch
     elif bound_ref != bound_target and bound_target == "memory":
-        return 2
+        return 2 # Switch from compute-bound to memory-bound
     elif bound_ref != bound_target and bound_target == "compute":
-        return 3
+        return 3 # Switch from memory-bound to compute-bound
     else:
         return 0
 
@@ -161,7 +168,11 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
         "H100": {  # H100 SXM (default)
             "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 494.7,
             "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
-        }
+        },
+        "Rubin": {
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 312, "fp32_tensor": 156,
+            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1944, "pcie_bw": 64, "nvlink_bw": 600
+        },
     }
 
     def get_gpu_specs(gpu_arch, prefix):
@@ -176,7 +187,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
     ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
     target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
     
-    t_total_target_list = list()
+    t_total_bursty_target_list = list()
+    t_total_interleave_target_list = list()
 
     for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
@@ -189,7 +201,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
                                     metric_values[metrics.index('FP32A')] + 
                                     metric_values[metrics.index('FP16A')])  
         t_dram_ref = sample_intv * metric_values[metrics.index('DRAMA')]
-        
+    
         t_roofline_ref = max(t_flop_ref, t_dram_ref)
         
         t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
@@ -200,8 +212,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
 
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-
         bound_switch = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref)
+        # bound_switch = 2
 
         if bound_switch == 1:
             t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
@@ -211,6 +223,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
             t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
         
         elif bound_switch == 2:
+            print("compute-bound switch to memory-bound")
             t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
                             sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
                             sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
@@ -218,17 +231,21 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
             t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"]) * mem_util_bound_switch
         
         elif bound_switch == 3:
+            print("memory-bound switch to compute-bound")
             t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
                             sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
                             sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
                             sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"])) * flop_util_bound_switch
+            
             t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
         
         else:
             raise ValueError("No Bound Switch Code Detected")
 
-        t_roofline_target = max(t_flop_target, t_dram_target)
+        t_roofline_target_interleave = max(t_flop_target, t_dram_target)
         
+        t_roofline_target_bursty = t_flop_target + t_dram_target
+
         t_otherGPU_target = t_otherGPU_ref
 
         t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
@@ -237,17 +254,25 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
 
         t_otherNode_target = t_otherNode_ref
 
-        t_total_target = t_roofline_target + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_bursty = t_roofline_target_bursty + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_target_list.append(t_total_target)    
+        t_total_target_interleave = t_roofline_target_interleave + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+
+        t_total_bursty_target_list.append(t_total_target_bursty)    
+
+        t_total_interleave_target_list.append(t_total_target_interleave)
 
     finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
-    if finish_idx < len(t_total_target_list):
-        t_total_target_list_finish = t_total_target_list[:finish_idx]
-    else:
-        t_total_target_list_finish = t_total_target_list
     
-    print(f"Estimate Runtime On Target Hardware: {sum(t_total_target_list_finish):0.2f}")
+    if finish_idx < len(t_total_interleave_target_list):
+        t_total_interleave_target_list_finish = t_total_interleave_target_list[:finish_idx]
+        t_total_bursty_target_list_finish = t_total_bursty_target_list[:finish_idx]
+    else:
+        t_total_interleave_target_list_finish = t_total_interleave_target_list
+        t_total_bursty_target_list_finish = t_total_bursty_target_list
+
+    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_finish):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_finish):0.2f}")
 
 
 def main():
@@ -259,15 +284,15 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
-    parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, required=True,
+    parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, default=0,
                         help='indicate the sleep period during GPU execution in milliseconds')  
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
                         help='indicate the timestamp for overall runtime in milliseconds')
     parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
                         choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the reference gpu architecture')
     parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
-                        choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the target gpu architecture')
-    parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', required=True,
+                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'Rubin'], help='indicate the target gpu architecture')
+    parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', default=None,
                         help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
@@ -285,8 +310,8 @@ def main():
     metrics = args.metrics
     ref_gpu_arch = args.ref_gpu_architect
     target_gpu_arch = args.target_gpu_architect
-    flop_util = args.flop_util
-    mem_util = args.mem_util
+    flop_util = args.flop_util # such as 0.3
+    mem_util = args.mem_util # such as 0.33
 
     profiled_df = process_file(dcgm_metric_file, metrics)
     
