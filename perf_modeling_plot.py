@@ -95,6 +95,9 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots'):
     # Create a mapping from GPU ID to color
     color_map = {gpu_id: gpu_colors[i] for i, gpu_id in enumerate(gpu_ids)}
     
+    # Define metrics that should have 0-1 range displayed as 0%-100%
+    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT'}
+    
     plot_count = 0
     
     for gpu_id in gpu_ids:
@@ -111,9 +114,25 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots'):
                 plt.plot(time_points, values, color=color, linewidth=2, 
                         marker='o', markersize=4, alpha=0.8)
                 
-                plt.title(f'GPU {gpu_id} - {metric} Over Time', fontsize=14, fontweight='bold')
-                plt.xlabel('Time Point', fontsize=12)
-                plt.ylabel(f'{metric} Value', fontsize=12)
+                plt.title(f'GPU {gpu_id} - {metric} Over Time', fontsize=16, fontweight='bold')
+                plt.xlabel('Time Point', fontsize=16)
+                
+                # Set y-axis label and range based on metric type
+                if metric in percentage_metrics:
+                    plt.ylabel(f'{metric} (%)', fontsize=16)
+                    
+                    # Special handling for GRACT - extend range to 110%
+                    if metric == 'GRACT':
+                        plt.ylim(0, 1.1)  # Set range from 0 to 1.1 (0% to 110%)
+                    else:
+                        plt.ylim(0, 1)    # Set range from 0 to 1 (0% to 100%)
+                    
+                    # Format y-axis to show as percentage (0 to 1 becomes 0% to 100%)
+                    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x*100:.1f}%'))
+                else:
+                    plt.ylabel(f'{metric} Value', fontsize=16)
+                
+                plt.tick_params(axis='both', which='major', labelsize=20)
                 plt.grid(True, alpha=0.3)
                 
                 # Add some styling
@@ -124,10 +143,16 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots'):
                 max_val = np.max(values)
                 min_val = np.min(values)
                 std_val = np.std(values)
-                stats_text = f'Mean: {mean_val:.3f}\nMax: {max_val:.3f}\nMin: {min_val:.3f}\nStd: {std_val:.3f}'
+                
+                # Format statistics based on metric type
+                if metric in percentage_metrics:
+                    # Convert to percentage for display
+                    stats_text = f'Mean: {mean_val*100:.1f}%, Max: {max_val*100:.1f}%, Min: {min_val*100:.1f}%, Std: {std_val*100:.1f}%'
+                else:
+                    stats_text = f'Mean: {mean_val:.3f}, Max: {max_val:.3f}, Min: {min_val:.3f}, Std: {std_val:.3f}'
                 
                 plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes, 
-                        verticalalignment='top', bbox=dict(boxstyle='round', 
+                        verticalalignment='top', fontsize=16, bbox=dict(boxstyle='round', 
                         facecolor='wheat', alpha=0.8))
                 
                 # Save plot
