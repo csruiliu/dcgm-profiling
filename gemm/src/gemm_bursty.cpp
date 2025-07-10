@@ -194,7 +194,7 @@ bool initialize_context(ExecutionContext<T>& ctx, size_t memory_matrix_size, siz
 
     delete[] h_compute_matrix;
 
-    printf("Initialized memory matrices: %d x %d x %d (total %.1f MB )\n", 
+    printf("Initialized memory matrices: %d x %d x %d (total %.1f MB)\n", 
            num_memory_matrices + 1, memory_matrix_size, memory_matrix_size, (double)num_memory_matrices * memory_matrix_bytes / 1e6);
     printf("Initialized compute matrices: 3 x %d x %d (total %.1f MB)\n", 
            compute_matrix_size, compute_matrix_size, (double)3.0 * compute_matrix_bytes / 1e6);
@@ -322,11 +322,6 @@ void bursty_execution(size_t memory_matrix_size, size_t compute_matrix_size, siz
         return;
     }
 
-    double cycle_duration = 0;
-    for (int i = 0; i < pattern_length; i++) {
-        cycle_duration += current_pattern[i].duration_ms;
-    }
-
     double preparation_time = total_timer.elapsed_ms();
     printf("\nTotal preparation time: %.2f seconds\n", preparation_time / 1000.0);
 
@@ -343,8 +338,8 @@ void bursty_execution(size_t memory_matrix_size, size_t compute_matrix_size, siz
         double cycle_time = cycle_timer.elapsed_ms();
 
         // Calculate actual metrics
-        double total_memory_data = (double)ctx.total_memory_ops_count * ctx.memory_matrix_bytes * 2.0;
-        double total_bandwidth = total_memory_data / (cycle_time / 1000.0) / 1e9;
+        double total_memory_rw = (double)ctx.total_memory_ops_count * ctx.memory_matrix_bytes * 2.0;
+        double total_bandwidth = total_memory_rw / (cycle_time / 1000.0) / 1e9;
         double total_flops = (double)ctx.total_compute_ops_count * ctx.flops_per_gemm;
         double total_gflops = total_flops / (cycle_time / 1000.0) / 1e9;
         
