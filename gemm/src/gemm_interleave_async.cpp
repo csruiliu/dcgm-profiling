@@ -139,13 +139,13 @@ bool initialize_context(ExecutionContext<T>& ctx, size_t memory_matrix_size, siz
     ctx.flops_per_gemm = calculate_gemm_gflops(compute_matrix_size);
 
     // Create CUDA streams
-    cudaError_t cuda_status = cudaStreamCreate(&ctx->memory_stream);
+    cudaError_t cuda_status = cudaStreamCreate(&ctx.memory_stream);
     if (cuda_status != cudaSuccess) {
         printf("ERROR: creating memory stream: %s\n", cudaGetErrorString(cuda_status));
         return false;
     }
     
-    cuda_status = cudaStreamCreate(&ctx->compute_stream);
+    cuda_status = cudaStreamCreate(&ctx.compute_stream);
     if (cuda_status != cudaSuccess) {
         printf("ERROR: creating compute stream: %s\n", cudaGetErrorString(cuda_status));
         cudaStreamDestroy(ctx.memory_stream);
