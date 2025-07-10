@@ -49,6 +49,10 @@ struct ExecutionContext {
     cublasHandle_t handle;
     T alpha, beta;
     
+    // CUDA streams for async operations
+    cudaStream_t memory_stream;
+    cudaStream_t compute_stream;
+
     // Matric num
     size_t num_memory_matrices;
 
@@ -134,12 +138,31 @@ bool initialize_context(ExecutionContext<T>& ctx, size_t memory_matrix_size, siz
     ctx.num_memory_matrices = num_memory_matrices;
     ctx.flops_per_gemm = calculate_gemm_gflops(compute_matrix_size);
 
+    // Create CUDA streams
+    cudaError_t cuda_status = cudaStreamCreate(&ctx->memory_stream);
+    if (cuda_status != cudaSuccess) {
+        printf("ERROR: creating memory stream: %s\n", cudaGetErrorString(cuda_status));
+        return false;
+    }
+    
+    cuda_status = cudaStreamCreate(&ctx->compute_stream);
+    if (cuda_status != cudaSuccess) {
+        printf("ERROR: creating compute stream: %s\n", cudaGetErrorString(cuda_status));
+        cudaStreamDestroy(ctx.memory_stream);
+        return false;
+    }
+
     // Create cuBLAS handle
     cublasStatus_t status = cublasCreate(&ctx.handle);
     if (status != CUBLAS_STATUS_SUCCESS) {
         printf("ERROR: creating cuBLAS handle\n");
+        cudaStreamDestroy(ctx.memory_stream);
+        cudaStreamDestroy(ctx.compute_stream);
         return false;
     }
+
+    // Set cuBLAS to use the compute stream
+    cublasSetStream(ctx.handle, ctx.compute_stream);
     cublasSetMathMode(ctx.handle, CUBLAS_DEFAULT_MATH);
 
     // Allocate GPU memory for memory bandwidth operations
@@ -185,16 +208,31 @@ bool initialize_context(ExecutionContext<T>& ctx, size_t memory_matrix_size, siz
 
 template<typename T>
 void cleanup_context(ExecutionContext<T>& ctx) {
-    for (int i = 0; i < ctx.num_memory_matrices; i++) {
-        cudaFree(ctx.d_memory_matrices[i]);
+    // Synchronize streams before cleanup
+    cudaStreamSynchronize(ctx.memory_stream);
+    cudaStreamSynchronize(ctx.compute_stream);
+    
+    // Destroy streams
+    cudaStreamDestroy(ctx.memory_stream);
+    cudaStreamDestroy(ctx.compute_stream);
+
+    // Destroy cuBLAS handle
+    if (ctx.handle) {
+        cublasDestroy(ctx.handle);
     }
-    delete[] ctx.d_memory_matrices;
+
+    // Free memory matrices
+    if (ctx.d_memory_matrices) {
+        for (int i = 0; i < ctx.num_memory_matrices; i++) {
+            cudaFree(ctx.d_memory_matrices[i]);
+        }
+        delete[] ctx.d_memory_matrices;
+    }
     
     cudaFree(ctx.d_temp_matrix);
     cudaFree(ctx.d_compute_matrixA);
     cudaFree(ctx.d_compute_matrixB);
     cudaFree(ctx.d_compute_matrixC);
-    cublasDestroy(ctx.handle);
 }
 
 template<typename T>
@@ -213,7 +251,7 @@ void interleave_execution(size_t memory_matrix_size, size_t compute_matrix_size,
     int matrix_index = 0;
     int cycle_memory_ops = 0;
     int cycle_compute_ops = 0;
-    int cycle_total_ops = 0;
+    long cycle_total_ops = 0;
     int num_cycles = 0;
     int matrix_src = 0, matrix_dst = 1;
     cublasOperation_t op_a;
@@ -230,23 +268,24 @@ void interleave_execution(size_t memory_matrix_size, size_t compute_matrix_size,
                 switch (cycle_memory_ops % 3) {
                     case 0:
                         // matrix to temp memcpy
-                        cudaMemcpy(ctx.d_temp_matrix, ctx.d_memory_matrices[matrix_src], 
-                                   ctx.memory_matrix_bytes, cudaMemcpyDeviceToDevice);
+                        cudaMemcpyAsync(ctx.d_temp_matrix, ctx.d_memory_matrices[matrix_src], 
+                                        ctx.memory_matrix_bytes, cudaMemcpyDeviceToDevice, ctx.memory_stream);
                         break;
                                         
                     case 1:
                         // temp to matrix memcpy
-                        cudaMemcpy(ctx.d_memory_matrices[matrix_dst], ctx.d_temp_matrix, 
-                                   ctx.memory_matrix_bytes, cudaMemcpyDeviceToDevice);
+                        cudaMemcpyAsync(ctx.d_memory_matrices[matrix_dst], ctx.d_temp_matrix, 
+                                        ctx.memory_matrix_bytes, cudaMemcpyDeviceToDevice, ctx.memory_stream);
                         break;
                         
                     case 2:
                         // Direct matrix-to-matrix copy
-                        cudaMemcpy(ctx.d_memory_matrices[matrix_dst], ctx.d_memory_matrices[matrix_src], 
-                                   ctx.memory_matrix_bytes, cudaMemcpyDeviceToDevice);
+                        cudaMemcpyAsync(ctx.d_memory_matrices[matrix_dst], ctx.d_memory_matrices[matrix_src], 
+                                        ctx.memory_matrix_bytes, cudaMemcpyDeviceToDevice, ctx.memory_stream);
                         break;
                 }
                 cycle_memory_ops++;
+                cycle_total_ops++;
                 matrix_src = (matrix_src + 1) % ctx.num_memory_matrices;
                 matrix_dst = (matrix_dst + 1) % ctx.num_memory_matrices;
             } else {
@@ -267,12 +306,19 @@ void interleave_execution(size_t memory_matrix_size, size_t compute_matrix_size,
                     printf("GEMM operation failed\n");
                     break;
                 }
-                cudaDeviceSynchronize();
                 cycle_compute_ops++;
+                cycle_total_ops++;
             }
+            
+            // Sync every 250ms
+            if (cycle_timer.elapsed_ms() < cycle_runtime_ms / 4) {
+                // Synchronize both streams at the end of each cycle for accurate timing
+                cudaStreamSynchronize(ctx.memory_stream);
+                cudaStreamSynchronize(ctx.compute_stream);
+            }
+
         }
         num_cycles++;
-
         double total_cycle_time = cycle_timer.elapsed_ms();
         
         // Calculate actual metrics
