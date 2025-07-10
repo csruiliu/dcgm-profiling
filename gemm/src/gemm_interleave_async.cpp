@@ -258,10 +258,12 @@ void interleave_execution(size_t memory_matrix_size, size_t compute_matrix_size,
     cublasOperation_t op_b;
 
     Timer cycle_timer;
+    Timer sync_timer;
     size_t cycle_runtime_ms = 1000;
     
     while (total_timer.elapsed_ms() < total_runtime_ms) {
         cycle_timer.reset();
+    
         // Execute operations for one cycle (1 second)
         while (cycle_timer.elapsed_ms() < cycle_runtime_ms) {
             if (cycle_total_ops % 2 == 0) {
@@ -311,10 +313,12 @@ void interleave_execution(size_t memory_matrix_size, size_t compute_matrix_size,
             }
             
             // Sync every 250ms
-            if (cycle_timer.elapsed_ms() < cycle_runtime_ms / 4) {
+            if (sync_timer.elapsed_ms() > cycle_runtime_ms / 10) {
                 // Synchronize both streams at the end of each cycle for accurate timing
                 cudaStreamSynchronize(ctx.memory_stream);
                 cudaStreamSynchronize(ctx.compute_stream);
+                cudaDeviceSynchronize();
+                sync_timer.reset();
             }
 
         }
