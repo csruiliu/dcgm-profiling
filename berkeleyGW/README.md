@@ -271,7 +271,7 @@ cmake \
   -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" \
   -DBUILD_SHARED_LIBS=ON \
   -DBLAS_LIBRARIES="$NVHPCLIB_DIR/libblas_lp64.so" \
-  -DLAPACK_LIBRARIES="$NVHPCLIB_DIR/liblapack_ilp64.so" ..
+  -DLAPACK_LIBRARIES="$NVHPCLIB_DIR/liblapack_lp64.so" ..
 
 make -j
 
