@@ -44,11 +44,9 @@ Then, copy the environment variables setting to `~/.bashrc` except for OpenMPI.
 
 According to the offical [website](http://manual.berkeleygw.org/2.0/compilation), we may need to build and install some libraries such as HDF5, FFTW, LAPACK, ScaLAPACK, OpenMPI.
 
+Alternatively, we can use some pre-built libs for LAPACK, ScaLAPACK, OpenMPI from `/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/comm_libs/12.3/openmpi4` and `/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/compilers/lib`
+
 **OpenMPI**
-
-**Using the OpenMPI from /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/comm_libs/12.3/openmpi4/latest**
-
-**No need to instal OpenMPI, using the following environment variables**
 
 ```bash
 export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
@@ -94,10 +92,6 @@ export CPATH="$OPENMPI_DIR/include:$CPATH"
 
 **OpenBLAS**
 
-**Using the libs from /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/compilers/lib**
-
-**No need to instal OpenBLAS, using the following environment variables**
-
 ```bash
 export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
 export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
@@ -114,9 +108,13 @@ tar -xvf OpenBLAS-0.3.29.tar.gz
 
 cd <uncompressed-folder>
 
-make -j8 USE_OPENMP=1 INTERFACE64=1 DYNAMIC_ARCH=1 CFLAGS="-O3 -fopenmp"
+# use lp64
+make -j USE_OPENMP=1 INTERFACE64=0 DYNAMIC_ARCH=1 CFLAGS="-O3 -fopenmp"
 
 make install PREFIX=$HOME/local/openblas-0.3.29
+
+#copy to $SCRATCH
+cp -r $HOME/local/openblas-0.3.29 $SCRATCH/local
 
 # adding the following environmet variable to ~/.bashrc
 export OPENBLAS_DIR="$SCRATCH/local/openblas-0.3.29"
@@ -204,10 +202,6 @@ export CPATH="$FFTW_DIR/include:$CPATH"
 
 **LAPACK**
 
-**Using the libs from /global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/compilers/lib**
-
-**No need to instal LAPACK, using the following environment variables**
-
 ```bash
 export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
 export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
@@ -234,7 +228,12 @@ cmake \
   -DCMAKE_INSTALL_PREFIX="$HOME/local/lapack-3.12.1" \
   -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" \
   -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" \
-  -DBUILD_SHARED_LIBS=ON ..
+  -DBUILD_SHARED_LIBS=ON \
+  -DUSE_OPTIMIZED_BLAS=ON \
+  -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" \
+  -DBUILD_INDEX64=OFF \
+  -DLAPACKE=ON \
+  -DCBLAS=ON ..
 
 make -j
 
@@ -270,8 +269,8 @@ cmake \
   -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" \
   -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" \
   -DBUILD_SHARED_LIBS=ON \
-  -DBLAS_LIBRARIES="$NVHPCLIB_DIR/libblas_lp64.so" \
-  -DLAPACK_LIBRARIES="$NVHPCLIB_DIR/liblapack_lp64.so" ..
+  -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" \
+  -DLAPACK_LIBRARIES="$LAPACK_DIR/lib64/liblapack.so" ..
 
 make -j
 
@@ -308,19 +307,18 @@ export NVSHMEM_DIR="$NVHPC_DIR/comm_libs/nvshmem"
 export MATHLIB_DIR="$NVHPC_DIR/math_libs"
 export NV_COMPILER_DIR="$NVHPC_DIR/compilers"
 
-#export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
-export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/latest"
+export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
 export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3"
 export FFTW_DIR="$SCRATCH/local/fftw-3.3.10"
-#export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
+export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
 export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2"
-export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
+#export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/latest"
 
 export MANPATH="$NVHPC_DIR/compilers/man:$MANPATH"
 
 export PATH="$NVHPC_COMPILER_EXTRA_DIR/bin:$NVHPC_COMPILER_DIR/bin:$CUDA_DIR/bin:$OPENMPI_DIR/bin:$HDF5_DIR/bin:$FFTW_DIR/bin:$PATH"
 
-export LD_LIBRARY_PATH="$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_DIR/lib:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$OPENMPI_DIR/lib:$SCALAPACK_DIR/lib:$HDF5_DIR/lib:$FFTW_DIR/lib:$NVHPCLIB_DIR:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$OPENMPI_DIR/lib:$SCALAPACK_DIR/lib:$HDF5_DIR/lib:$FFTW_DIR/lib:$LD_LIBRARY_PATH"
 
 export CPATH="$NVHPC_DIR/compilers/extras/qd/include/qd:$NVSHMEM_DIR/include:$NCCL_DIR/include:$MATHLIB_DIR/include:$OPENMPI_DIR/include:$HDF5_DIR/include:$FFTW_DIR/include:$CPATH"
 
