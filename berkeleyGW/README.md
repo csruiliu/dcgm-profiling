@@ -48,14 +48,6 @@ Alternatively, we can use some pre-built libs for LAPACK, ScaLAPACK, OpenMPI fro
 
 **OpenMPI**
 
-```bash
-export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
-export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/latest"
-export PATH="$OPENMPI_DIR/bin:$PATH"
-export LD_LIBRARY_PATH="$OPENMPI_DIR/lib:$LD_LIBRARY_PATH"
-export CPATH="$OPENMPI_DIR/include:$CPATH"
-```
-
 Downloading OpenMPI source codes from [github](https://www-lb.open-mpi.org/software/ompi), taking 4.1.6 as an example,
 
 ```bash
@@ -70,13 +62,18 @@ cd openmpi-4.1.6-src
 ./configure \
   --prefix="$HOME/local/openmpi-4.1.6" \
   CC=nvc \
+  CXX=nvc++ \
   FC=nvfortran \
-  CFLAGS="-tp x86-64-v3 -fPIC" \
-  FCFLAGS="-tp x86-64-v3 -fPIC" \
+  CFLAGS="-fast -tp x86-64-v3 -Mvect=simd -fPIC" \
+  CXXFLAGS="-fast -tp x86-64-v3 -Mvect=simd -fPIC" \
+  FCFLAGS="-fast -tp x86-64-v3 -Mvect=simd -fPIC" \
   --enable-static \
-  --enable-heterogeneous
+  --disable-debug \
+  --enable-heterogeneous \
+  --with-verbs
+  --with-cude=/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11/cuda
 
-make -j all
+make -j
 
 make install
 
@@ -92,13 +89,6 @@ export CPATH="$OPENMPI_DIR/include:$CPATH"
 
 **OpenBLAS**
 
-```bash
-export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
-export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
-
-export LD_LIBRARY_PATH="$NVHPCLIB_DIR:$LD_LIBRARY_PATH"
-```
-
 Download OpenBLAS-0.3.29 source codes from [github](https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.29/OpenBLAS-0.3.29.tar.gz), taking 0.3.29 as an example,
 
 ```bash
@@ -106,10 +96,23 @@ wget https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.29/OpenBLAS-
 
 tar -xvf OpenBLAS-0.3.29.tar.gz
 
-cd <uncompressed-folder>
+mv OpenBLAS-0.3.29 openblas-0.3.29-src
 
-# use lp64
-make -j USE_OPENMP=1 INTERFACE64=0 DYNAMIC_ARCH=1 CFLAGS="-O3 -fopenmp"
+cd openblas-0.3.29-src
+
+make -j \
+  CC=nvc \
+  CXX=nvc++ \
+  FC=nvfortran \
+  CFLAGS="-fast -tp x86-64-v3 -mp=multicore -Mvect=simd -Mflushz -fPIC" \
+  CXXFLAGS="-fast -tp x86-64-v3 -mp=multicore -Mvect=simd -Mflushz -fPIC" \
+  FCFLAGS="-fast -tp x86-64-v3 -mp=multicore -Mvect=simd -Mflushz -fPIC" \
+  USE_OPENMP=1 \
+  INTERFACE64=0 \
+  DYNAMIC_ARCH=1 \
+  TARGET=GENERIC \ 
+  USE_THREAD=1
+
 
 make install PREFIX=$HOME/local/openblas-0.3.29
 
@@ -132,19 +135,23 @@ wget https://github.com/HDFGroup/hdf5/releases/download/hdf5-1_14_3/hdf5-1_14_3.
 
 tar -xvf hdf5-1_14_3.tar.gz
 
-cd <uncompressed-folder>
+mv hdfsrc hdf5-1.14.3-src
+
+cd hdf5-1.14.3-src
 
 # run ./configure --help for more details
 # rename the uncompressed folder if its name is hdf5-1.14.3
 ./configure \
   --prefix="$HOME/local/hdf5-1.14.3" \
   CC=mpicc \
+  CXX=mpicxx \
   FC=mpifort \
-  CFLAGS="-tp x86-64-v3 -fPIC" \
-  FCFLAGS="-tp x86-64-v3 -fPIC" \
+  CFLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  CXXFLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  FCFLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
   --enable-fortran \
   --enable-shared \
-  --enable-parallel
+  --enable-parallel 
 
 # run make as as many cores as possible
 make -j
@@ -178,13 +185,21 @@ cd fftw-3.3.10-src
 ./configure \
   --prefix="$HOME/local/fftw-3.3.10" \
   CC=mpicc \
+  CXX=mpicxx \
   FC=mpifort \
-  CFLAGS="-tp x86-64-v3 -fPIC" \
-  FFLAGS="-tp x86-64-v3 -fPIC" \
+  CFLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  CXXFLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  FCFLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
   --enable-shared \
   --enable-openmp \
   --enable-threads \
-  --enable-mpi
+  --enable-mpi \
+  --enable-sse2 \
+  --enable-avx \
+  --enable-avx2 \
+  --enable-avx-128-fma \
+  --enable-generic-simd128 \
+  --enable-generic-simd256
 
 make -j
 
@@ -225,9 +240,11 @@ cd build
 cmake \
   -DCMAKE_Fortran_COMPILER=mpifort \
   -DCMAKE_C_COMPILER=mpicc \
+  -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_INSTALL_PREFIX="$HOME/local/lapack-3.12.1" \
-  -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC" \
-  -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC" \
+  -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  -DCMAKE_C_FLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  -DCMAKE_CXX_FLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
   -DBUILD_SHARED_LIBS=ON \
   -DUSE_OPTIMIZED_BLAS=ON \
   -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" \
@@ -265,9 +282,11 @@ cd build
 cmake \
   -DCMAKE_Fortran_COMPILER=mpifort \
   -DCMAKE_C_COMPILER=mpicc \
+  -DCMAKE_CXX_COMPILER=mpicxx \
   -DCMAKE_INSTALL_PREFIX="$HOME/local/scalapack-2.2.2" \
-  -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" \
-  -DCMAKE_C_FLAGS="-tp x86-64-v3 -fPIC -fopenmp" \
+  -DCMAKE_Fortran_FLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  -DCMAKE_C_FLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
+  -DCMAKE_CXX_FLAGS="-tp x86-64-v3 -fast -Mvect=simd -mp=multicore -Mflushz -fPIC" \
   -DBUILD_SHARED_LIBS=ON \
   -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" \
   -DLAPACK_LIBRARIES="$LAPACK_DIR/lib64/liblapack.so" ..
