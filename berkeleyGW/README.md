@@ -96,9 +96,9 @@ wget https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.29/OpenBLAS-
 
 tar -xvf OpenBLAS-0.3.29.tar.gz
 
-mv OpenBLAS-0.3.29 openblas-0.3.29-src
+mv OpenBLAS-0.3.29 OpenBLAS-0.3.29-src
 
-cd openblas-0.3.29-src
+cd OpenBLAS-0.3.29-src
 
 make -j \
   CC=nvc \
@@ -110,11 +110,10 @@ make -j \
   USE_OPENMP=1 \
   INTERFACE64=0 \
   DYNAMIC_ARCH=1 \
-  TARGET=GENERIC \ 
   USE_THREAD=1
 
 
-make install PREFIX=$HOME/local/openblas-0.3.29
+make install PREFIX=$HOME/local/OpenBLAS-0.3.29
 
 #copy to $SCRATCH
 cp -r $HOME/local/openblas-0.3.29 $SCRATCH/local
@@ -217,13 +216,6 @@ export CPATH="$FFTW_DIR/include:$CPATH"
 
 **LAPACK**
 
-```bash
-export NVHPC_DIR="/global/software/rocky-8.x86_64/gcc/linux-rocky8-x86_64/gcc-8.5.0/nvhpc-23.11-gh5cygvdqksy6mxuy2xgoibowwxi3w7t/Linux_x86_64/23.11"
-export NVHPCLIB_DIR="$NVHPC_DIR/compilers/lib"
-
-export LD_LIBRARY_PATH="$NVHPCLIB_DIR:$LD_LIBRARY_PATH"
-```
-
 Downloading LAPACK source codes from their [website](https://www.netlib.org/lapack), taking 3.12.1 as an example,
 
 ```bash
@@ -250,7 +242,8 @@ cmake \
   -DBLAS_LIBRARIES="$OPENBLAS_DIR/lib/libopenblas.so" \
   -DBUILD_INDEX64=OFF \
   -DLAPACKE=ON \
-  -DCBLAS=ON ..
+  -DCBLAS=ON \
+  -DCMAKE_EXE_LINKER_FLAGS="-L$NVHPC_ROOT/compilers/lib -lnvf" ..
 
 make -j
 
@@ -316,30 +309,32 @@ export FC="$NVHPC_DIR/compilers/bin/nvfortran"
 export F90="$NVHPC_DIR/compilers/bin/nvfortran"
 export F77="$NVHPC_DIR/compilers/bin/nvfortran"
 
-export CPP="cpp"
+export CPP="cpp" 
 
 export CUDA_DIR="$NVHPC_DIR/cuda"
-export NVHPC_COMPILER_DIR="$NVHPC_DIR/compilers"
 export NVHPC_COMPILER_EXTRA_DIR="$NVHPC_DIR/compilers/extras/qd"
 export NCCL_DIR="$NVHPC_DIR/comm_libs/nccl"
 export NVSHMEM_DIR="$NVHPC_DIR/comm_libs/nvshmem"
 export MATHLIB_DIR="$NVHPC_DIR/math_libs"
-export NV_COMPILER_DIR="$NVHPC_DIR/compilers"
 
-export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6"
-export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3"
-export FFTW_DIR="$SCRATCH/local/fftw-3.3.10"
-export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1"
-export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2"
-#export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/latest"
+#export OPENBLAS_DIR="$SCRATCH/local/openblas-0.3.29-self"
+#export OPENMPI_DIR="$SCRATCH/local/openmpi-4.1.6-self"
+#export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3-self"
+#export LAPACK_DIR="$SCRATCH/local/lapack-3.12.1-self"
+#export FFTW_DIR="$SCRATCH/local/fftw-3.3.10-self"
+#export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2-self"
 
-export MANPATH="$NVHPC_DIR/compilers/man:$MANPATH"
+export NVHPC_COMPILER_DIR="$NVHPC_DIR/compilers"
+export OPENMPI_DIR="$NVHPC_DIR/comm_libs/12.3/openmpi4/openmpi-4.1.5"
+export HDF5_DIR="$SCRATCH/local/hdf5-1.14.3-sys"
+export SCALAPACK_DIR="$SCRATCH/local/scalapack-2.2.2-sys"
+export FFTW_DIR="$SCRATCH/local/fftw-3.3.10-sys"
 
-export PATH="$NVHPC_COMPILER_EXTRA_DIR/bin:$NVHPC_COMPILER_DIR/bin:$CUDA_DIR/bin:$OPENMPI_DIR/bin:$HDF5_DIR/bin:$FFTW_DIR/bin:$PATH"
+export PATH=$NVHPC_COMPILER_EXTRA_DIR/bin:$NVHPC_COMPILER_DIR/bin:$CUDA_DIR/bin:$OPENMPI_DIR/bin:$HDF5_DIR/bin:$FFTW_DIR/bin:$OPENBLAS_DIR/bin:$PATH
 
-export LD_LIBRARY_PATH="$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$OPENMPI_DIR/lib:$SCALAPACK_DIR/lib:$HDF5_DIR/lib:$FFTW_DIR/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH=$NVSHMEM_DIR/lib:$NCCL_DIR/lib:$MATHLIB_DIR/lib64:$NVHPC_COMPILER_DIR/lib:$NVHPC_COMPILER_EXTRA_DIR/lib:$CUDA_DIR/extras/CUPTI/lib64:$CUDA_DIR/lib64:$SCALAPACK_DIR/lib:$HDF5_DIR/lib:$FFTW_DIR/lib:$OPENMPI_DIR/lib:$OPENBLAS_DIR/lib:$LAPACK_DIR/lib64:$LD_LIBRARY_PATH
 
-export CPATH="$NVHPC_DIR/compilers/extras/qd/include/qd:$NVSHMEM_DIR/include:$NCCL_DIR/include:$MATHLIB_DIR/include:$OPENMPI_DIR/include:$HDF5_DIR/include:$FFTW_DIR/include:$CPATH"
+export CPATH=$NVHPC_DIR/compilers/extras/qd/include/qd:$NVSHMEM_DIR/include:$NVHPC_COMPILER_DIR/include:$NCCL_DIR/include:$MATHLIB_DIR/include:$OPENMPI_DIR/include:$OPENBLAS_DIR/include:$HDF5_DIR/include:$FFTW_DIR/include:$LAPACK_DIR/include:$CPATH
 
 ```
 
