@@ -33,7 +33,7 @@ cd    $RESULTS_DIR
 
 ln -s $BGW_DIR/sigma.cplx.x .
 NNPOOL=2
-cat ../sigma.inp |\
+cat ${Si214_Benchmark_folder}/sigma.inp |\
 sed "s/NNPOOL/${NNPOOL}/g" > sigma.inp
 ln -sfn  ${Si214_WFN_folder}/WFN_out.h5   ./WFN_inner.h5
 ln -sfn  ${Si214_WFN_folder}/RHO          .

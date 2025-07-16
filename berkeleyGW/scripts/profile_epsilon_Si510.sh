@@ -23,7 +23,7 @@ stripe_large $RESULTS_DIR
 cp ./wrap_dcgmi.sh $RESULTS_DIR
 cd    $RESULTS_DIR
 ln -s $BGW_DIR/epsilon.cplx.x .
-ln -s  ../epsilon.inp .
+ln -s  ${Si510_Benchmark_folder}/epsilon.inp .
 ln -sfn  ${Si510_WFN_folder}/WFNq.h5      .
 ln -sfn  ${Si510_WFN_folder}/WFN_out.h5   ./WFN.h5
 
