@@ -172,7 +172,7 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref):
     bound_ref = "compute" if t_intensity_balance > balance_ref else "memory"
 
     bound_target = "compute" if t_intensity_balance > balance_target else "memory"
-
+        
     if bound_ref == bound_target:
         return 1 # No bound switch
     elif bound_ref != bound_target and bound_target == "memory":
@@ -247,7 +247,6 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
         bound_switch = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref)
-        # bound_switch = 2
 
         if bound_switch == 1:
             t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
