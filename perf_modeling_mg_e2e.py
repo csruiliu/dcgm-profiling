@@ -20,32 +20,88 @@ def process_file(num_gpu, file_path, metric_names):
     # Initialize a dict to hold data lists for each GPU
     gpu_data = {i: [] for i in range(num_gpu)}
 
+    column_mapping = {}
+    header_parsed = False
+
+    header_pattern = re.compile(r'^#Entity')
+    
     # Compile regex patterns for all GPU prefixes
     gpu_patterns = [re.compile(rf'^GPU {i}\s') for i in range(num_gpu)]
 
     # Read the file
     with open(file_path, 'r') as file:
         lines = file.readlines()
-    
-    for line in lines:
-        for i, pattern in enumerate(gpu_patterns):
-            if pattern.match(line):
-                # Split the line by three or more spaces
-                values = re.split(r'\s{3,}', line.strip())
-
-                # Only get number values, so "GPU x" will be discarded
-                numeric_values = [float(value) for value in values if is_number(value)]
-
-                if len(numeric_values) == len(metric_names):
-                    gpu_data[i].append(numeric_values)
-                else:
-                    raise ValueError(f"The number of data columns doesn't match the number of metric names for GPU {i}")
+        for line in lines:
+            # Process header information
+            if header_pattern.match(line) and not header_parsed:
+                header_parts = re.split(r'\s{2,}', line.strip())
+                # Remove the '#Entity' part and 'ID' if present
+                columns = [col for col in header_parts if col not in ['#Entity', 'ID']]
                 
-                # Only one GPU per line, so stop checking patterns
-                break  
-     
-    gpu_dfs = [pd.DataFrame(gpu_data[i], columns=metric_names) for i in range(num_gpu)]
+                # Create mapping from metric name to column index
+                for i, col_name in enumerate(columns):
+                    column_mapping[col_name] = i
 
+                # Verify all requested metrics are present
+                missing_metrics = []
+                for metric in metric_names:
+                    if metric not in column_mapping:
+                        missing_metrics.append(metric)
+
+                if missing_metrics:
+                    raise ValueError(f"Missing metrics in data file: {missing_metrics}")
+                        
+                header_parsed = True
+                continue
+        
+            # Process GPU data lines
+            if line.startswith('GPU'):
+                # Split the line by three or more spaces
+                parts = re.split(r'\s{3,}', line.strip())
+
+                # Extract GPU number
+                gpu_match = re.search(r'GPU (\d+)', parts[0])
+                if not gpu_match:
+                    raise ValueError("Cannot extract GPU ID")
+
+                gpu_num = int(gpu_match.group(1))
+                if gpu_num >= num_gpu:
+                    raise ValueError("The GPU ID exceeds the number of GPUs")
+
+                # Extract data values (skip the GPU identifier)
+                data_values = parts[1:]
+
+                # Convert to numeric and extract only requested metrics in specified order
+                try:
+                    numeric_values = [float(x) for x in data_values]
+                    
+                    # Extract requested metrics in the order specified by user
+                    selected_metrics = []
+                    for metric in metric_names:
+                        col_idx = column_mapping[metric]
+                        if col_idx < len(numeric_values):
+                            selected_metrics.append(numeric_values[col_idx])
+                        else:
+                            raise ValueError(f"Column index {col_idx} for metric {metric} out of range")
+                    
+                    gpu_data[gpu_num].append(selected_metrics)
+                    
+                except (ValueError, IndexError) as e:
+                    print(f"Warning: Could not parse line: {line}")
+                    print(f"Error: {e}")
+                    continue
+    
+    
+    # Create DataFrames with the requested metrics as columns
+    gpu_dfs = []
+    for i in range(num_gpu):
+        if gpu_data[i]:
+            df = pd.DataFrame(gpu_data[i], columns=metric_names)
+            gpu_dfs.append(df)
+        else:
+            # Create empty DataFrame with correct columns if no data
+            gpu_dfs.append(pd.DataFrame(columns=metric_names))
+     
     # returns a list of DataFrames, one per GPU
     return gpu_dfs  
 
