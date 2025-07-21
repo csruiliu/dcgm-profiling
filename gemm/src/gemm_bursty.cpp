@@ -47,8 +47,8 @@ struct ExecutionPhase {
 
 // Define your execution patterns here
 ExecutionPhase EXEC_PATTERN[] = {
-    {OP_MEMORY, 250.0},
-    {OP_COMPUTE, 750.0}
+    {OP_MEMORY, 500.0},
+    {OP_COMPUTE, 500.0}
 };
 
 template<typename T>
@@ -311,7 +311,7 @@ void bursty_execution(size_t memory_matrix_size, size_t compute_matrix_size, siz
     printf("Using execution pattern with %d phases:\n", pattern_length);
     for (int i = 0; i < pattern_length; i++) {
         printf("  Phase %d: %s (%.0fms)\n", i + 1,
-               current_pattern[i].type == OP_MEMORY ? "Pure GPU Memory Ops" : "Pure Compute",
+               current_pattern[i].type == OP_MEMORY ? "GPU Memory Ops" : "GPU Compute",
                current_pattern[i].duration_ms);
     }
     printf("\n");
