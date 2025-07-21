@@ -187,7 +187,7 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots', window_si
                         plt.ylim(0, 1)    # Set range from 0 to 1 (0% to 100%)
                     
                     # Format y-axis to show as percentage (0 to 1 becomes 0% to 100%)
-                    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x*100:.1f}%'))
+                    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x*100)}%'))
                 else:
                     plt.ylabel(f'{metric} Value', fontsize=26)
                 
