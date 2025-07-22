@@ -24,15 +24,15 @@ def create_dcgm_comparison():
     
     # Bursty pattern actual vs DCGM
     # Peak: 200 GB/s for 0.5s, then 0 for 0.5s → Average: 100 GB/s
-    mem_actual_bursty = np.where(time <= 0.5, 800, 0)
-    mem_dcgm_bursty = np.full_like(time, 400) 
+    mem_actual_bursty = np.where(time <= 0.5, 1600, 0)
+    mem_dcgm_bursty = np.full_like(time, 800) 
     
     compute_actual_bursty = np.where(time <= 0.5, 0, 30)
     compute_dcgm_bursty = np.full_like(time, 15.0)
     
     # Interleaved pattern (DCGM matches actual) - keeping this at 400 GB/s steady
-    mem_actual_interleaved = np.full_like(time, 400)
-    mem_dcgm_interleaved = np.full_like(time, 400)
+    mem_actual_interleaved = np.full_like(time, 800)
+    mem_dcgm_interleaved = np.full_like(time, 800)
     
     # Interleaved pattern (DCGM matches actual) - keeping this at 400 GB/s steady
     compute_actual_interleaved = np.full_like(time, 15.0)
@@ -56,9 +56,9 @@ def create_dcgm_comparison():
     
 
     ax1.set_ylabel('Memory Bandwidth (GB/s)', color=mem_color, fontweight='bold', fontsize=20)
-    ax1.set_ylim(-40, 1600)
-    ax1.set_yticks([0, 400, 800, 1200, 1600])
-    ax1.set_yticklabels(['0', '400', '800', '1200', '1600'])
+    ax1.set_ylim(-80, 3200)
+    ax1.set_yticks([0, 800, 1600, 2400, 3200])
+    ax1.set_yticklabels(['0', '800', '1600', '2400', '3200'])
     ax1.tick_params(axis='y', labelcolor=mem_color, labelsize=20)
     
     # Set custom x-axis ticks for left subplot
@@ -125,9 +125,9 @@ def create_dcgm_comparison():
     ax2.plot(time, mem_dcgm_interleaved, color=mem_color, linestyle='--', 
              linewidth=4, label='Average Memory BW')
     ax2.set_ylabel('Memory Bandwidth (GB/s)', color=mem_color, fontweight='bold', fontsize=20)
-    ax2.set_ylim(-40, 1600)
-    ax2.set_yticks([0, 400, 800, 1200, 1600])
-    ax2.set_yticklabels(['0', '400', '800', '1200', '1600'])
+    ax2.set_ylim(-80, 3200)
+    ax2.set_yticks([0, 800, 1600, 2400, 3200])
+    ax2.set_yticklabels(['0', '800', '1600', '2400', '3200'])
     ax2.tick_params(axis='y', labelcolor=mem_color, labelsize=20)
     
     # Set custom x-axis ticks for left subplot
