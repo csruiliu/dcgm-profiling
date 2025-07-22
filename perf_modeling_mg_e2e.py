@@ -186,19 +186,23 @@ def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_
     print(f"Estimate Runtime On Reference Hardware: {sum(max_list):.2f}")
 
 
-def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref):
+def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target):
     balance_ref = ref_gpu_spec['ref_fp64'] * 1000 / ref_gpu_spec['ref_mem_bw']
 
     balance_target = target_gpu_spec['target_fp64'] * 1000 / target_gpu_spec['target_mem_bw']
 
     if t_dram_ref != 0:
-        t_intensity_balance = t_flop_ref * ref_gpu_spec['ref_fp64'] * 1000 / (t_dram_ref * ref_gpu_spec['ref_mem_bw'])
-        
+        t_intensity_ref = t_flop_ref * ref_gpu_spec['ref_fp64'] * 1000 / (t_dram_ref * ref_gpu_spec['ref_mem_bw'])
     else:
-        t_intensity_balance = float('-inf')
+        t_intensity_ref = float('-inf')
+
+    if t_dram_target != 0:
+        t_intensity_target = t_flop_target * target_gpu_spec['target_fp64'] * 1000 / (t_dram_target * target_gpu_spec['target_mem_bw'])
+    else:
+        t_intensity_target = float('-inf')
     
-    bound_ref = "compute" if t_intensity_balance > balance_ref else "memory"
-    bound_target = "compute" if t_intensity_balance > balance_target else "memory"
+    bound_ref = "compute" if t_intensity_ref > balance_ref else "memory"
+    bound_target = "compute" if t_intensity_target > balance_target else "memory"
     
     return bound_ref, bound_target
 
@@ -206,6 +210,7 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref):
 def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec, flop_util_bound_switch, mem_util_bound_switch):    
     t_total_bursty_target_list = list()
     t_total_interleave_target_list = list()
+    t_total_switch_target_list = list()
 
     for row in df.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
@@ -213,6 +218,19 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
         # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
         metric_values = list(getattr(row, metric) for metric in metrics)
         
+        # Find the largest value among FLOP metrics and get its name
+        flop_metrics = ['TENSO', 'FP64A', 'FP32A', 'FP16A']
+        max_metric_name = max(flop_metrics, key=lambda x: metric_values[metrics.index(x)])
+        max_flop_value = metric_values[metrics.index(max_metric_name)]
+
+        # Mapping from metric names to GPU spec keys
+        metric_to_spec = {
+            'TENSO': 'ref_fp64_tensor',
+            'FP64A': 'ref_fp64',
+            'FP32A': 'ref_fp32',
+            'FP16A': 'ref_fp16'
+        }
+
         t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
                                     metric_values[metrics.index('FP64A')] + 
                                     metric_values[metrics.index('FP32A')] + 
@@ -230,39 +248,33 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
         
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-        bound_ref, bound_target = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref)
-
-        if bound_ref == bound_target:
-            t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
-                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
-            t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
-        
-        elif bound_ref != bound_target and bound_target == "memory":
-            print("compute-bound switch to memory-bound")
-            t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
-                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
-            t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"]) * mem_util_bound_switch
-        
-        elif bound_ref != bound_target and bound_target == "compute":
-            print("memory-bound switch to compute-bound")
-            t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
-                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"])) * flop_util_bound_switch
-            
-            t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
-        
-        else:
-            raise ValueError("Impossible Error")
+        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) + 
+                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
         
         t_roofline_target_interleave = max(t_flop_target, t_dram_target)
 
         t_roofline_target_bursty = t_flop_target + t_dram_target
+
+        bound_ref, bound_target = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target)
+
+        if bound_ref == bound_target:
+            pass
+        elif bound_ref != bound_target and bound_target == "memory":
+            print("compute-bound switch to memory-bound")
+            # t_dram_target = t_dram_target * mem_util_bound_switch
+            t_dram_target = sample_intv * mem_util_bound_switch * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
+        elif bound_ref != bound_target and bound_target == "compute":
+            print("memory-bound switch to compute-bound")
+            # t_flop_target = t_flop_target * flop_util_bound_switch
+            t_flop_target = sample_intv * flop_util_bound_switch * (ref_gpu_spec[metric_to_spec[max_metric_name]] / target_gpu_spec[metric_to_spec[max_metric_name]])
+        else:
+            raise ValueError("Impossible Error")
         
+        t_roofline_target_switch = max(t_flop_target, t_dram_target)
+
         t_otherGPU_target = t_otherGPU_ref
 
         t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
@@ -275,18 +287,24 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
 
         t_total_target_interleave = t_roofline_target_interleave + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
+        t_total_target_switch = t_roofline_target_switch + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+
         t_total_bursty_target_list.append(t_total_target_bursty)    
 
         t_total_interleave_target_list.append(t_total_target_interleave) 
+
+        t_total_switch_target_list.append(t_total_target_switch)
     
     if finish_idx < len(t_total_interleave_target_list):
         t_total_interleave_target_list_finish = t_total_interleave_target_list[:finish_idx]
         t_total_bursty_target_list_finish = t_total_bursty_target_list[:finish_idx]
+        t_total_switch_target_list_finish = t_total_switch_target_list[:finish_idx]
     else:
         t_total_interleave_target_list_finish = t_total_interleave_target_list
         t_total_bursty_target_list_finish = t_total_bursty_target_list
+        t_total_switch_target_list_finish = t_total_switch_target_list
 
-    return t_total_interleave_target_list_finish, t_total_bursty_target_list_finish
+    return t_total_interleave_target_list_finish, t_total_bursty_target_list_finish, t_total_switch_target_list_finish
 
 
 def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util, mem_util):
@@ -327,12 +345,14 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
 
     t_total_bursty_dict = dict()
     t_total_interleaved_dict = dict()
+    t_total_switch_dict = dict()
 
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_total_bursty, t_total_interleaved = pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec, flop_util, mem_util)
+            t_total_interleaved, t_total_bursty, t_total_switch = pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec, flop_util, mem_util)
             t_total_bursty_dict[f"GPU{i}"] = t_total_bursty
             t_total_interleaved_dict[f"GPU{i}"] = t_total_interleaved
+            t_total_switch_dict[f"GPU{i}"] = t_total_switch
         else:
             raise ValueError("The total time list is empty")
 
@@ -350,6 +370,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
     # Transpose the lists and take max of every `agg_samples` samples
     max_value_bursty_list = []
     max_value_interleaved_list = []
+    max_value_switch_list = []
 
     for start in range(0, num_rows, agg_samples):
         end = min(start + agg_samples, num_rows)
@@ -374,8 +395,20 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
         max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
         max_value_interleaved_list.append(max_value)
 
-    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(max_value_interleaved_list):.2f}")
-    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(max_value_bursty_list):.2f}")
+    for start in range(0, num_rows, agg_samples):
+        end = min(start + agg_samples, num_rows)
+        # For each row in this window, find the max across GPUs, then find the max in the window
+        agg_time_gpus = {
+            gpu: sum(t_total_switch_dict[gpu][row_idx] for row_idx in range(start, end))
+            for gpu in t_total_switch_dict
+        }
+
+        max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
+        max_value_switch_list.append(max_value)
+
+    print(f"Estimate Runtime On Target Hardware [Interleave Mode]: {sum(max_value_interleaved_list):.2f}")
+    print(f"Estimate Runtime On Target Hardware [Bursty Mode]: {sum(max_value_bursty_list):.2f}")
+    print(f"Estimate Runtime On Target Hardware [Switch Mode]: {sum(max_value_switch_list):.2f}")
 
 
 def main():
