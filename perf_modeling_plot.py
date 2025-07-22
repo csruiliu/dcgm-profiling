@@ -160,7 +160,7 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots', window_si
                 values, time_points = apply_sampling_window(original_values, window_size, aggregation_method)
                 
                 # Create plot for ALL metrics (no filtering)
-                plt.figure(figsize=(10, 6))
+                plt.figure(figsize=(10, 4.5))
                 color = color_map[gpu_id]
                 
                 plt.plot(time_points, values, color=color, linewidth=4, marker='o', markersize=6, alpha=0.8)
@@ -174,7 +174,7 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots', window_si
                 '''
                 # title = f'GPU {gpu_id} - {metric} Over Time'
                 # plt.title(title, fontsize=16, fontweight='bold')
-                plt.xlabel('Time Point', fontsize=26)
+                plt.xlabel('Time (s)', fontsize=26)
                 
                 # Set y-axis label and range based on metric type
                 if metric in percentage_metrics:
