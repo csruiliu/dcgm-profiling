@@ -1,7 +1,10 @@
 import pandas as pd
 import numpy as np
+import os
+from pathlib import Path
 import argparse
 import re
+from collections import Counter
 
 
 # Define a custom argument type for a list of strings
@@ -16,7 +19,7 @@ def is_number(value):
         return False
 
 # Function to read the file and process the data
-def process_file(num_gpu, file_path, metric_names):
+def process_single_file(num_gpu, file_path, metric_names):
     # Initialize a dict to hold data lists for each GPU
     gpu_data = {i: [] for i in range(num_gpu)}
 
@@ -104,8 +107,195 @@ def process_file(num_gpu, file_path, metric_names):
     # returns a list of DataFrames, one per GPU
     return gpu_dfs  
 
+
+def organize_by_file_content(all_files, num_gpu): 
+    file_info = []
     
-# Function to plot dataframe
+    for file_path in all_files:
+        try:
+            with open(file_path, 'r') as f:
+                # Read first few lines to find GPU information
+                content = ""
+                for i, line in enumerate(f):
+                    content += line
+                    if i > 10:  # Only read first 50 lines for efficiency
+                        break
+                    
+            # Count occurrences of different GPU IDs
+            gpu_pattern = re.compile(r'GPU (\d+)')
+            gpu_matches = gpu_pattern.findall(content)
+            
+            if gpu_matches:
+                # Find the most common GPU ID in this file
+                gpu_counter = Counter(gpu_matches)
+                most_common_gpu_id = int(gpu_counter.most_common(1)[0][0])
+                total_lines = len(gpu_matches)
+                
+                file_info.append((file_path, most_common_gpu_id, total_lines))
+            else:
+                print(f"Warning: No GPU data found in {file_path}")
+                # Still include the file but with unknown GPU ID
+                file_info.append((file_path, -1, 0))
+                
+        except Exception as e:
+            print(f"Warning: Could not read file {file_path}: {e}")
+            # Include the file anyway
+            file_info.append((file_path, -1, 0))
+    
+    # Sort files by filename to ensure consistent ordering
+    # This gives us a deterministic order regardless of filesystem order
+    file_info.sort(key=lambda x: x[0].name)
+
+    if len(file_info) != num_gpu:
+        print(f"Content-based matching found {len(file_info)} valid files, expected {num_gpu}.")
+        return None
+    
+    # Sort by node_id, then by gpu_id
+    file_info.sort(key=lambda x: (x[1], x[2]))
+    
+    # Assign logical GPU IDs based on file order
+    organized_files = [str(info[0]) for info in file_info]
+    
+    print("File organization by content analysis (order-based):")
+    for logical_gpu_id, (file_path, detected_gpu_id, line_count) in enumerate(file_info):
+        if detected_gpu_id >= 0:
+            print(f"  Logical GPU {logical_gpu_id}: {file_path.name} (detected GPU {detected_gpu_id}, {line_count} data lines)")
+        else:
+            print(f"  Logical GPU {logical_gpu_id}: {file_path.name} (GPU ID unknown, {line_count} data lines)")
+    
+    return organized_files
+
+
+def process_multiple_files_single_gpu(file_paths, metric_names):
+    '''
+    multiple files each file contain data of a single gpu
+    '''
+    gpu_dfs = []
+    
+    for logical_gpu_id, file_path in enumerate(file_paths):
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+            
+        gpu_data = []
+        column_mapping = {}
+        header_parsed = False
+        header_pattern = re.compile(r'^#Entity')
+        
+        print(f"Processing file {file_path} as logical GPU {logical_gpu_id}")
+        
+        with open(file_path, 'r') as file:
+            lines = file.readlines()
+            for line in lines:
+                # Process header information
+                if header_pattern.match(line) and not header_parsed:
+                    header_parts = re.split(r'\s{2,}', line.strip())
+                    # Remove the '#Entity' part and 'ID' if present
+                    columns = [col for col in header_parts if col not in ['#Entity', 'ID']]
+                    
+                    # Create mapping from metric name to column index
+                    for j, col_name in enumerate(columns):
+                        column_mapping[col_name] = j
+
+                    # Verify all requested metrics are present
+                    missing_metrics = []
+                    for metric in metric_names:
+                        if metric not in column_mapping:
+                            missing_metrics.append(metric)
+
+                    if missing_metrics:
+                        raise ValueError(f"Missing metrics in data file {file_path}: {missing_metrics}")
+                            
+                    header_parsed = True
+                    continue
+            
+                # Process ALL GPU data lines (regardless of the GPU ID mentioned in the line)
+                if line.startswith('GPU'):
+                    # Split the line by three or more spaces
+                    parts = re.split(r'\s{3,}', line.strip())
+
+                    # Extract data values (skip the GPU identifier)
+                    # We ignore the actual GPU ID in the line since this file represents one logical GPU
+                    data_values = parts[1:]
+
+                    # Convert to numeric and extract only requested metrics in specified order
+                    try:
+                        numeric_values = [float(x) for x in data_values]
+                        
+                        # Extract requested metrics in the order specified by user
+                        selected_metrics = []
+                        for metric in metric_names:
+                            col_idx = column_mapping[metric]
+                            if col_idx < len(numeric_values):
+                                selected_metrics.append(numeric_values[col_idx])
+                            else:
+                                raise ValueError(f"Column index {col_idx} for metric {metric} out of range")
+                            
+                        gpu_data.append(selected_metrics)
+                        
+                    except (ValueError, IndexError) as e:
+                        print(f"Warning: Could not parse line in {file_path}: {line}")
+                        print(f"Error: {e}")
+                        continue
+        
+        # Create DataFrame for this logical GPU
+        if gpu_data:
+            df = pd.DataFrame(gpu_data, columns=metric_names)
+            gpu_dfs.append(df)
+            print(f"Logical GPU {logical_gpu_id}: Created DataFrame with {len(gpu_data)} rows")
+        else:
+            # Create empty DataFrame with correct columns if no data
+            gpu_dfs.append(pd.DataFrame(columns=metric_names))
+            print(f"Warning: No data found for logical GPU {logical_gpu_id} in file {file_path}")
+    
+    return gpu_dfs
+
+
+def scan_and_organize_gpu_files(folder_path, num_gpu):
+    """
+    Scan a folder for GPU data files and organize them by logical GPU ID.
+    
+    Args:
+        folder_path: Path to folder containing GPU data files
+        num_gpu: Expected total number of GPUs
+    
+    Returns:
+        List of file paths ordered by logical GPU ID
+    """
+    folder_path = Path(folder_path)
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
+    
+    # Find all potential GPU data files (adjust extensions as needed)
+    file_patterns = ['*.out']
+    all_files = []
+    for pattern in file_patterns:
+        all_files.extend(folder_path.glob(pattern))
+    
+    if not all_files:
+        raise FileNotFoundError(f"No data files found in {folder_path}")
+    
+    print(f"Found {len(all_files)} potential GPU data files in {folder_path}")
+
+    organized_files = organize_by_file_content(all_files, num_gpu)
+    if organized_files:
+        return organized_files
+
+
+# Update the wrapper function to handle folder input
+def process_files(num_gpu, dcgm_input, metric_names):
+    if os.path.isdir(dcgm_input):
+        print(f"Processing folder: {dcgm_input}")
+        file_paths = scan_and_organize_gpu_files(dcgm_input, num_gpu)
+        profiled_df = process_multiple_files_single_gpu(file_paths, metric_names)
+    elif os.path.isfile(dcgm_input):
+        print(f"Processing single file with {num_gpu} GPUs: {dcgm_input}")
+        profiled_df = process_single_file(num_gpu, dcgm_input, metric_names)
+    else:
+        raise ValueError(f"Input path '{dcgm_input}' is neither a valid file nor a directory")
+
+    return profiled_df
+
+
 def perf_modeling_per_gpu(df, metrics, finish_idx, sample_intv, hw_pcie_gb, hw_nvlink_gb):
     t_total_list = list()
 
@@ -416,8 +606,8 @@ def main():
     # get all parameters
     ###################################
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('-f', '--dcgm_file', action='store', type=str, required=True,
-                        help='indicate the dcgm output file')
+    parser.add_argument('-f', '--dcgm_input', action='store', type=str, required=True,
+                        help='DCGM input: either a single file (containing multiple GPU data) or a folder path (containing multiple files with one GPU data each)')
     parser.add_argument('-n', '--num_gpu', action='store', type=int, required=True,
                         help='indicate number of gpus used for computation')    
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
@@ -438,7 +628,7 @@ def main():
                         help='indicate the estimated memory utlization when bound swtich')
     args = parser.parse_args()
 
-    dcgm_metric_file = args.dcgm_file
+    dcgm_input = args.dcgm_input
     num_gpu = args.num_gpu
     overall_runtime_ms = args.overall_runtime_ms
     sample_interval_ms = args.sample_interval_ms
@@ -449,13 +639,13 @@ def main():
     flop_util = args.flop_util # such as 0.3
     mem_util = args.mem_util # such as 0.33
 
-    profiled_df = process_file(num_gpu, dcgm_metric_file, metrics)
-    
-    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch)
+    profiled_df = process_files(num_gpu, dcgm_input, metrics)
 
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch)
+    
     if target_gpu_arch is not None:
         perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util, mem_util)
-
+    
 
 if __name__=="__main__":
     main()
