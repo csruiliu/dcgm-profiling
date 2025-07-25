@@ -6,14 +6,14 @@ CFLAGS += -DUSE_MPI
 
 all: gemm.x gemm_lt.x gemm_mpi.x gemm_bursty.x gemm_bursty_stream.x gemm_interleave_sync.x gemm_interleave_async.x
 
-gemm.x: gemm.cpp calc_gemm.cpp Makefile
+gemm.x: gemm.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm.x gemm.cpp $(LIBS)
 
 gemm_lt.x: gemm_lt.cpp calc_gemm_lt.cpp Makefile
 	$(CC) $(CFLAGS) -DUSE_CUBLASLT -o gemm_lt.x gemm_lt.cpp $(LIBS) -lcublasLt
 
-gemm_mpi.x: gemm_mpi.cpp calc_gemm_mpi.cpp Makefile
-	$(CC) $(CFLAGS) -DUSE_CUBLASLT -o gemm_mpi.x gemm_mpi.cpp $(LIBS) -lcublasLt
+gemm_mpi.x: gemm_mpi.cpp Makefile
+	$(CC) $(CFLAGS) -o gemm_mpi.x gemm_mpi.cpp $(LIBS)
 
 gemm_bursty.x: gemm_bursty.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_bursty.x gemm_bursty.cpp $(LIBS)

@@ -1,17 +1,20 @@
 #!/bin/bash
-#SBATCH -N 1
-#SBATCH -C gpu
+#SBATCH --qos=debug
+#SBATCH -C gpu&hbm40g
 #SBATCH -G 1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
 #SBATCH -q debug
-#SBATCH -t 00:30:00
+#SBATCH -t 00:10:00
 #SBATCH -A nstaff
-#SBATCH -o ../results/GEMM_%j/GEMM_%j.out
 #SBATCH --exclusive
+#SBATCH -o ../results/GEMM_%j/GEMM_%j.out
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1
 export OMP_PLACES=threads
-export OMP_PROC_BIND=spread
+export OMP_PROC_BIND=true
 
 # create results directory if not exist
 if [ ! -d "../results" ]; then
@@ -20,7 +23,7 @@ fi
 
 export RESULTS_DIR=../results/GEMM_${SLURM_JOBID}
 
-export DCGM_SAMPLE_RATE=100
+export DCGM_SAMPLE_RATE=1000
 #gemm.x args
 # 1: matrix size
 # 2: repeats

@@ -1,17 +1,20 @@
 #!/bin/bash
-#SBATCH -N 1
-#SBATCH -C gpu
+#SBATCH --qos=debug
+#SBATCH -C gpu&hbm40g
 #SBATCH -G 4
+#SBATCH --nodes=1
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=8
 #SBATCH -q debug
-#SBATCH -t 00:30:00
+#SBATCH -t 00:10:00
 #SBATCH -A nstaff
 #SBATCH --exclusive
 #SBATCH -o ../results/GEMM_MPI_%j/GEMM_MPI_%j.out
 
 #OpenMP settings:
-export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=4
 export OMP_PLACES=threads
-export OMP_PROC_BIND=spread
+export OMP_PROC_BIND=true
 
 # create results directory if not exist
 if [ ! -d "../results" ]; then
@@ -20,7 +23,7 @@ fi
 
 export RESULTS_DIR=../results/GEMM_MPI_${SLURM_JOBID}
 
-export DCGM_SAMPLE_RATE=100
+export DCGM_SAMPLE_RATE=1000
 
 for prec in D S H; do
 #run the application:
