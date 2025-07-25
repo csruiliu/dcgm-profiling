@@ -1,174 +1,255 @@
-#include <stdio.h>
 #include <iostream>
-#include <cstdlib>
+#include <memory>
 #include <chrono>
-#include <thread>
-#include <time.h>
-
+#include <random>
+#include <algorithm>
+#include <string>
+#include <type_traits>
+#include <mpi.h>
 #include <cuda_runtime.h>
-#include "cublas_v2.h"
-#include <cublasLt.h>
+#include <cublas_v2.h>
 #include <cuda_fp16.h>
 
-// Sleep time in milliseconds
-#define SLEEP_TIME 40000
+namespace gemm {
 
-// Add this global variable to counter sleep calls
-int sleep_occurrences = 0;
+enum class Precision { SINGLE = 'S', DOUBLE = 'D', HALF = 'H' };
 
-// Assuming max 20 sleep calls, adjust as needed
-double sleep_timestamps[20]; 
+template<typename T>
+struct CublasTraits;
 
-// ------------------------------------------------------- //
-// Function: get_seconds for current time
-// ------------------------------------------------------- //
-double get_milliseconds() {
-  struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC, &now);
-  
-  const double seconds = (double)now.tv_sec;
-  const double nanosec = (double)now.tv_nsec;
-  
-  // Convert nanoseconds to milliseconds
-  return (seconds * 1000.0) + (nanosec / 1000000.0);  
-}
+template<>
+struct CublasTraits<float> {
+  static constexpr auto gemm_func = &cublasSgemm;
+  static constexpr auto math_mode = CUBLAS_TF32_TENSOR_OP_MATH;
+};
 
-// ------------------------------------------------------- //
-// Function to make both CPU and GPU idle
-// ------------------------------------------------------- //
-inline void sleep_cpu_gpu_idle(int milliseconds) {
-  // Capture timestamp before sleep
-  double sleep_start_time = get_milliseconds();
-  
-  // Increment the sleep counter (declare as extern in this file)
-  extern int sleep_occurrences;
-  extern double sleep_timestamps[];
-  sleep_timestamps[sleep_occurrences] = sleep_start_time;
-  sleep_occurrences++;
+template<>
+struct CublasTraits<double> {
+  static constexpr auto gemm_func = &cublasDgemm;
+  static constexpr auto math_mode = CUBLAS_DEFAULT_MATH;
+};
 
-  // Ensure all GPU operations are complete first
-  cudaDeviceSynchronize();
-  
-  // Now just sleep the CPU - GPU will be naturally idle
-  std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
-  
-  // GPU remains idle during this time since no kernels are launched
-}
+template<>
+struct CublasTraits<__half> {
+  static constexpr auto gemm_func = &cublasHgemm;
+  static constexpr auto math_mode = CUBLAS_TENSOR_OP_MATH;
+};
 
-#define PRECISION 'S'
-#include "calc_gemm.cpp"
-#undef PRECISION
+template<typename T>
+class Gemm {
+private:
+  int N_;
 
-#define PRECISION 'D'
-#include "calc_gemm.cpp"
-#undef PRECISION
+  // Matrices on Host
+  T* h_matrixA; 
+  T* h_matrixB;
+  T* h_matrixC;
 
-#define PRECISION 'H'
-#include "calc_gemm.cpp"
-#undef PRECISION
+  // Matrices on Device
+  T* d_matrixA;
+  T* d_matrixB;
+  T* d_matrixC;
 
-int main(int argc, char *argv[]) {
+  cublasHandle_t cublas_handle_;
 
-  double global_start_time = get_milliseconds();
+public:
+  Gemm(int N): N_(N) {}
 
-  int N = 4096;
-  int repeats = 100;
-  double alpha = 1.0;
-  double beta = 1.0;
-  char prec = 'D';
+  ~Gemm() {
+      cleanup();
+  }
 
-  // ------------------------------------------------------- //
-  // Arguments Parsing
-  // ------------------------------------------------------- //
+
+  bool initialize() {
+    return allocate_host_matrices() && allocate_gpu_matrices() && setup_cublas();
+  }
+
+  bool compute_gemm(int repeats, T alpha = T(1.0), T beta = T(0.0)) {
+    for (int r = 0; r < repeats; ++r) {
+        cublasStatus_t status = CublasTraits<T>::gemm_func(cublas_handle_,
+                                                           CUBLAS_OP_N, CUBLAS_OP_N,
+                                                           N_, N_, N_,
+                                                           &alpha,
+                                                           d_matrixA, N_, d_matrixB, N_,
+                                                           &beta,
+                                                           d_matrixC, N_);
+        handle_cublas_error(status, "gemm computation");
+    }
+        
+    cudaDeviceSynchronize();  
+    return true;
+  }
+
+  bool gather_results() {    
+    cudaError_t err = cudaMemcpy(h_matrixC, d_matrixC, sizeof(T) * N_ * N_, cudaMemcpyDeviceToHost);
+    handle_cuda_error(err, "cudaMemcpy C host to device");
+
+    cudaDeviceSynchronize();
+    return true;
+  }
+
+private:
+    bool allocate_host_matrices() {
+      std::cout << "Allocating Matrics on Host" << std::endl;
+      // Use pinned memory for better transfer performance
+      cudaError_t err = cudaMallocHost(&h_matrixA, sizeof(T) * N_ * N_);
+      handle_cuda_error(err, "cudaMallocHost h_matrixA");
+      
+      err = cudaMallocHost(&h_matrixB, sizeof(T) * N_ * N_);
+      handle_cuda_error(err, "cudaMallocHost h_matrixB");
+      
+      err = cudaMallocHost(&h_matrixC, sizeof(T) * N_ * N_);
+      handle_cuda_error(err, "cudaMallocHost h_matrixC");
+      
+      // Initialize matrices with random values
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
+      
+      for (int i = 0; i < N_ * N_; ++i) {
+          h_matrixA[i] = static_cast<T>(dis(gen));
+          h_matrixB[i] = static_cast<T>(dis(gen));
+          h_matrixC[i] = static_cast<T>(dis(gen));
+      }
+      return true;
+    }
+
+    bool allocate_gpu_matrices() {
+      // Allocate matrices on host
+      cudaError_t err = cudaMalloc(&d_matrixA, sizeof(T) * N_ * N_);
+      handle_cuda_error(err, "cudaMalloc d_matrixA");
+      
+      err = cudaMalloc(&d_matrixB, sizeof(T) * N_ * N_);
+      handle_cuda_error(err, "cudaMalloc d_matrixB");
+      
+      err = cudaMalloc(&d_matrixC, sizeof(T) * N_ * N_);
+      handle_cuda_error(err, "cudaMalloc d_matrixC");
+      
+      // Copy from host to device
+      err = cudaMemcpy(d_matrixA, h_matrixA, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+      handle_cuda_error(err, "cudaMemcpy A host to device");
+      
+      err = cudaMemcpy(d_matrixB, h_matrixB, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+      handle_cuda_error(err, "cudaMemcpy B host to device");
+      
+      err = cudaMemcpy(d_matrixC, h_matrixC, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+      handle_cuda_error(err, "cudaMemcpy C host to device");
+
+      cudaDeviceSynchronize();
+      return true;
+    }
+
+    bool setup_cublas() {
+        cublasStatus_t status = cublasCreate(&cublas_handle_);
+        handle_cublas_error(status, "cublasCreate");
+        
+        status = cublasSetMathMode(cublas_handle_, CublasTraits<T>::math_mode);
+        handle_cublas_error(status, "cublasSetMathMode");
+        
+        return true;
+    }
+
+    void cleanup() {
+      if (cublas_handle_) {
+          cublasDestroy(cublas_handle_);
+          cublas_handle_ = nullptr;
+      }
+      
+      cudaFree(d_matrixA);
+      cudaFree(d_matrixB);
+      cudaFree(d_matrixC);
+      cudaFreeHost(h_matrixA);
+      cudaFreeHost(h_matrixB);
+      cudaFreeHost(h_matrixC);
+            
+      // Reset pointers
+      d_matrixA = d_matrixB = d_matrixC = nullptr;
+      h_matrixA = h_matrixB = h_matrixC = nullptr;
+    }
+
+    void handle_cuda_error(cudaError_t error, const std::string& operation) {
+      if (error != cudaSuccess) {
+          std::cerr << operation << " failed: " << cudaGetErrorString(error) << std::endl;
+          exit(1);
+      }
+    }
+    
+    void handle_cublas_error(cublasStatus_t status, const std::string& operation) {
+      if (status != CUBLAS_STATUS_SUCCESS) {
+          std::cerr << operation << " failed with cuBLAS error " << status << std::endl;
+          exit(1);
+      }
+    }
+};
+
+} // namespace gemm
+
+int main(int argc, char* argv[]) {
+
   if (argc != 6) {
-    printf("Usage: %s <N> <repeats> <alpha> <beta> <precision: S|D|H>\n", argv[0]);
+    std::cout << "Usage: " << argv[0] << " <N> <repeats> <alpha> <beta> <precision(S/D/H)>" << std::endl;
+    std::cout << "  N: Matrix size (NxN)" << std::endl;
+    std::cout << "  repeats: Number of GEMM iterations" << std::endl;
+    std::cout << "  alpha, beta: GEMM coefficients" << std::endl;
+    std::cout << "  precision: S(ingle), D(ouble), or H(alf)" << std::endl;
+    return 1;
+  }
+  
+  int N = std::atoi(argv[1]);
+  int repeats = std::atoi(argv[2]);
+  double alpha = std::atof(argv[3]);
+  double beta = std::atof(argv[4]);
+  char precision = argv[5][0];
+
+  std::cout << "Starting distributed GEMM with:" << std::endl;
+  std::cout << "  Matrix size: " << N << "x" << N << std::endl;
+  std::cout << "  Repeats: " << repeats << std::endl;
+  std::cout << "  Precision: " << precision << std::endl;
+
+  auto start_time = std::chrono::high_resolution_clock::now();
+
+  try {
+    switch (precision) {
+      case 'S': {
+        gemm::Gemm<float> gemm(N);
+        if (gemm.initialize() &&  
+            gemm.compute_gemm(repeats, static_cast<float>(alpha), static_cast<float>(beta)) &&
+            gemm.gather_results()) {
+            std::cout << "Single precision GEMM completed successfully" << std::endl;
+        }
+        break;
+      }
+      case 'D': {
+        gemm::Gemm<double> gemm(N);
+        if (gemm.initialize() &&  
+            gemm.compute_gemm(repeats, alpha, beta) &&
+            gemm.gather_results()) {
+            std::cout << "Double precision GEMM completed successfully" << std::endl;
+        }
+        break;
+      }
+      case 'H': {
+        gemm::Gemm<__half> gemm(N);
+        if (gemm.initialize() &&  
+            gemm.compute_gemm(repeats, static_cast<__half>(alpha), static_cast<__half>(beta)) &&
+            gemm.gather_results()) {
+            std::cout << "Half precision GEMM completed successfully" << std::endl;
+        }
+        break;
+      }
+      default:
+        std::cerr << "Invalid precision. Use S, D, or H" << std::endl;
+        return 1;
+    }
+  } catch (const std::exception& e) {
+    std::cerr <<"Exception: " << e.what() << std::endl;
     return 1;
   }
 
-  N = atoi(argv[1]);
-  repeats = atoi(argv[2]);
-  alpha = atof(argv[3]);
-  beta = atof(argv[4]);
-  prec = argv[5][0];
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-  printf("Matrix size input by command line: %d\n", N);
-  printf("Repeat multiply %d times.\n", repeats);
-  printf("Alpha =    %f\n", alpha);
-  printf("Beta  =    %f\n", beta);
-  printf("Precision =    %c\n", prec);
+  std::cout << "Total execution time: " << duration.count() << " ms" << std::endl;
 
-  double alloc_time, device_alloc_time, host_to_device_time, gemm_time, device_to_host_time, free_time, device_free_time, overall_time;
-  int sizeof_gemm_t;
-  //int status;
-
-  switch (prec) {
-    case 'S': {
-      float *matrixA, *matrixB, *matrixC;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
-                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time, &device_free_time);
-      //status = check_gemm(N, matrixA, matrixB, matrixC);
-      free_gemm(matrixA, matrixB, matrixC, &free_time);
-      sizeof_gemm_t = sizeof(float);
-      break;
-    }
-    case 'D': {
-      double *matrixA, *matrixB, *matrixC;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
-                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time, &device_free_time);
-      //status = check_gemm(N, matrixA, matrixB, matrixC);
-      free_gemm(matrixA, matrixB, matrixC, &free_time);
-      sizeof_gemm_t = sizeof(double);
-      break;
-    }
-    case 'H': {
-      __half *matrixA, *matrixB, *matrixC;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &alloc_time);
-      calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC,
-                &device_alloc_time, &host_to_device_time, &gemm_time, &device_to_host_time, &device_free_time);
-      //status = check_gemm(N, matrixA, matrixB, matrixC);
-      free_gemm(matrixA, matrixB, matrixC, &free_time);
-      sizeof_gemm_t = sizeof(__half);
-      break;
-    }
-  }
-
-  printf("\n");
-  printf("===============================================================\n");
-  double N_dbl = (double)N;
-  double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
-  printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1000 * 1000)));
-  printf("Time for host memory allocation and initialization: %f milliseconds\n", alloc_time);
-  printf("Time for device memory allocation: %f milliseconds\n", device_alloc_time);
-  printf("Time for host to device data transfer: %f milliseconds\n", host_to_device_time);
-  printf("Stage 1: %f seconds\n", (alloc_time + device_alloc_time + host_to_device_time) / 1000);
-  printf("Time for GEMM operations: %f milliseconds\n", gemm_time);
-  printf("Stage 2: %f seconds\n", gemm_time / 1000);
-  printf("Time for device to host data transfer: %f milliseconds\n", device_to_host_time);
-  printf("Time for free device memory: %f milliseconds\n", device_free_time);
-  printf("Time for free host memory: %f milliseconds\n", free_time);
-  printf("Stage 3: %f seconds\n", (device_to_host_time + device_free_time + free_time) / 1000);
-  const double flops_computed = (N_dbl * N_dbl * N_dbl * 2.0 * (double)repeats) + (N_dbl * N_dbl * 3 * (double)repeats);
-  printf("GFLOP/s rate:         %f GF/s\n", (flops_computed / (gemm_time / 1000.0)) / 1.0e9);  // Convert back to seconds for FLOPS calculation
-  printf("===============================================================\n");
-
-  // Sleep analysis section
-  printf("===============================================================\n");
-  printf("SLEEP ANALYSIS:\n");
-  printf("Sleep function called %d times\n", sleep_occurrences);
-  printf("Total sleep time: %f milliseconds\n", (double)(sleep_occurrences * SLEEP_TIME));
-  printf("Sleep timestamps:\n");
-  for (int i = 0; i < sleep_occurrences; i++) {
-      printf("  Sleep #%d: %f milliseconds\n", i + 1, sleep_timestamps[i] - global_start_time);
-  }
-  printf("===============================================================\n");
-  printf("\n");
-
-  double global_end_time = get_milliseconds();
-  overall_time = global_end_time - global_start_time;
-  printf("===============================================================\n");
-  printf("Overll runtime time: %f milliseconds\n", overall_time);
-  printf("===============================================================\n");
   return 0;
 }
