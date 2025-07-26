@@ -7,6 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH -t 00:30:00
 #SBATCH -A nstaff
+#SBATCH --exclusive
 #SBATCH -o ../results/GEMM_MPI_%j/GEMM_MPI_%j.out
 
 #OpenMP settings:
