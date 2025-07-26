@@ -78,8 +78,7 @@ def process_file(file_path, metric_names):
     return gpu_dfs 
     
 
-
-def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, gpu_arch):
+def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, gpu_arch):
     sample_intv = sample_interval_ms / 1000
     
     if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
@@ -114,42 +113,31 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
 
         t_total_list.append(t_total)
 
-    # get the sleep and finish index according to the actual sleep time
-    if sleep_period_ms != 0:
-        sleep_idx_list = [int(x / sample_interval_ms) for x in sleep_marks]
-    
+    # Calculate finish index based on overall runtime
     finish_idx = int(overall_runtime_ms / sample_interval_ms)
-
+    
     if finish_idx < len(t_total_list):
         t_total_list_finish = t_total_list[:finish_idx]
     else:
         t_total_list_finish = t_total_list
 
-    if sleep_period_ms != 0 and sleep_marks is None:
-        start_mark = 0
-        time_sum_segments = list()
-        for sleep_mark in sleep_idx_list:
-            if sleep_mark <= len(t_total_list_finish):
-                segment_sum = sum(t_total_list_finish[start_mark:sleep_mark])
-                # First segment: keep original sum, others: subtract sleep time
-                if len(time_sum_segments) == 0:
-                    time_sum_segments.append(segment_sum)
-                else:
-                    time_sum_segments.append(segment_sum - sleep_period_ms / 1000)
-                start_mark = sleep_mark
+    if start_ts is not None or end_ts is not None:
+        start_idx = 0
+        end_idx = len(t_total_list_finish)
 
-        # Add remaining elements
-        if start_mark < len(t_total_list_finish):
-            remaining_sum = sum(t_total_list_finish[start_mark:])
-            if len(time_sum_segments) == 0:  # If this is the first (and only) segment
-                time_sum_segments.append(remaining_sum)
-            else:
-                time_sum_segments.append(remaining_sum - sleep_period_ms / 1000)
+        if start_ts is not None:
+            start_idx = max(0, int(start_ts / sample_interval_ms))
+        
+        if end_ts is not None:
+            end_idx = min(len(t_total_list_finish), int(end_ts / sample_interval_ms))
+        
+        if start_idx < end_idx:
+            t_total_list_compute = t_total_list_finish[start_idx:end_idx]
+        else:
+            t_total_list_compute = []
+            raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-        time_sum_segments_final = [0 if x < 0 else x for x in time_sum_segments]
-        print(time_sum_segments_final)
-    else:
-        print(f"Estimate Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
+    print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_compute):0.2f}")
 
 
 def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target):
@@ -173,7 +161,7 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_
     return bound_ref, bound_target
 
 
-def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util_bound_switch, mem_util_bound_switch):
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, flop_util_bound_switch, mem_util_bound_switch):
     sample_intv = sample_interval_ms / 1000
     
     # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
@@ -266,11 +254,11 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
         if bound_ref == bound_target:
             pass
         elif bound_ref != bound_target and bound_target == "memory":
-            print("compute-bound switch to memory-bound")
+            # print("compute-bound switch to memory-bound")
             # t_dram_target = t_dram_target * mem_util_bound_switch
             t_dram_target = sample_intv * mem_util_bound_switch * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
         elif bound_ref != bound_target and bound_target == "compute":
-            print("memory-bound switch to compute-bound")
+            # print("memory-bound switch to compute-bound")
             # t_flop_target = t_flop_target * flop_util_bound_switch
             t_flop_target = sample_intv * flop_util_bound_switch * (ref_gpu_spec[metric_to_spec[max_metric_name]] / target_gpu_spec[metric_to_spec[max_metric_name]])
         else:
@@ -309,9 +297,29 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, r
         t_total_bursty_target_list_finish = t_total_bursty_target_list
         t_total_switch_target_list_finish = t_total_switch_target_list
 
-    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_finish):0.2f}")
-    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_finish):0.2f}")
-    print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_finish):0.2f}")
+    if start_ts is not None or end_ts is not None:
+        start_idx = 0
+        end_idx = len(t_total_interleave_target_list_finish)
+
+        if start_ts is not None:
+            start_idx = max(0, int(start_ts / sample_interval_ms))
+        
+        if end_ts is not None:
+            end_idx = min(len(t_total_interleave_target_list_finish), int(end_ts / sample_interval_ms))
+        
+        if start_idx < end_idx:
+            t_total_interleave_target_list_compute = t_total_interleave_target_list_finish[start_idx:end_idx]
+            t_total_bursty_target_list_compute = t_total_bursty_target_list_finish[start_idx:end_idx]
+            t_total_switch_target_list_compute = t_total_switch_target_list_finish[start_idx:end_idx]
+        else:
+            t_total_interleave_target_list_compute = []
+            t_total_bursty_target_list_compute = []
+            t_total_switch_target_list_compute = []
+            raise ValueError("End Timestamp is earlier than Start Timestamp")
+
+    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_compute):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_compute):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_compute):0.2f}")
 
 
 def main():
@@ -323,16 +331,16 @@ def main():
                         help='indicate the dcgm output file')
     parser.add_argument('-d', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
-    parser.add_argument('-s', '--sleep_period_ms', action='store', type=int, default=0,
-                        help='indicate the sleep period during GPU execution in milliseconds')  
+    parser.add_argument('-st', '--start_timestamp', action='store', type=int, required=False, default=None,
+                        help='Start timestamp for analysis window (in milliseconds)')
+    parser.add_argument('-et', '--end_timestamp', action='store', type=int, required=False, default=None,
+                        help='End timestamp for analysis window (in milliseconds)')
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
                         help='indicate the timestamp for overall runtime in milliseconds')
     parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
                         choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
     parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
                         choices=['A100-40', 'A100-80', 'A40', 'H100', 'Rubin'], help='indicate the target gpu architecture')
-    parser.add_argument('--sleep_marks', action='store', type=float, nargs='+', default=None,
-                        help='indicate the space-separated list of sleep starting time marks in milliseconds')  
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, required=True,
@@ -343,10 +351,10 @@ def main():
 
     dcgm_metric_file = args.dcgm_file
     sample_interval_ms = args.sample_interval_ms
-    sleep_period_ms = args.sleep_period_ms
     overall_runtime_ms = args.overall_runtime_ms
-    sleep_marks = args.sleep_marks
     metrics = args.metrics
+    start_ts = args.start_timestamp
+    end_ts = args.end_timestamp
     ref_gpu_arch = args.ref_gpu_architect
     target_gpu_arch = args.target_gpu_architect
     flop_util = args.flop_util # such as 0.3
@@ -354,10 +362,10 @@ def main():
 
     profiled_df = process_file(dcgm_metric_file, metrics)
     
-    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, sleep_period_ms, sleep_marks, ref_gpu_arch)
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch)
     
     if target_gpu_arch is not None:
-        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util, mem_util)
+        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, flop_util, mem_util)
 
 
 if __name__=="__main__":
