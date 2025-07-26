@@ -235,7 +235,6 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
             'half': 'target_fp16_tensor'
         }
 
-
         t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
                                     metric_values[metrics.index('FP64A')] + 
                                     metric_values[metrics.index('FP32A')] + 
