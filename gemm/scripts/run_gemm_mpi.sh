@@ -5,10 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=4
 #SBATCH --cpus-per-task=8
-#SBATCH -q debug
-#SBATCH -t 00:10:00
+#SBATCH -t 00:30:00
 #SBATCH -A nstaff
-#SBATCH --exclusive
 #SBATCH -o ../results/GEMM_MPI_%j/GEMM_MPI_%j.out
 
 #OpenMP settings:
@@ -28,10 +26,8 @@ export DCGM_SAMPLE_RATE=1000
 for prec in D S H; do
 #run the application:
 start=$(date +%s.%N)
-dcgm_delay=${DCGM_SAMPLE_RATE} \
-	srun -n 4 -c 1 --cpu_bind=cores -G 4 \
-	./wrap_dcgmi_mpi.sh \
-	./gemm_mpi.x 16384 100 1.0 1.0 $prec \
+dcgm_delay=${DCGM_SAMPLE_RATE} srun --cpu_bind=cores ./wrap_dcgmi_mpi.sh \
+	./gemm_mpi.x 65536 500 1.0 1.0 $prec \
 	> ${RESULTS_DIR}/"$prec"gemm_mpi-${SLURM_JOBID}.dcgmi
 end=$(date +%s.%N)
 elapsed=$(printf "%s - %s\n" $end $start | bc -l)
