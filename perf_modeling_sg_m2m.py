@@ -161,29 +161,29 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_
     return bound_ref, bound_target
 
 
-def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, flop_util_bound_switch, mem_util_bound_switch):
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util_bound_switch, mem_util_bound_switch):
     sample_intv = sample_interval_ms / 1000
     
     # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
     GPU_SPECS = {
         "A100-40": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
             "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
         },
         "A100-80": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
             "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
         },
         "A40": {
-            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8,
+            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
             "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
         },
         "H100": {  # H100 SXM (default)
-            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 494.7,
-            "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
+            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989,
+            "fp16": 133.8, "fp16_tensor": 1979, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
         },
         "Rubin": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 312, "fp32_tensor": 156,
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 312, "tf32_tensor": 156,
             "fp16": 78, "fp16_tensor": 312, "mem_bw": 1944, "pcie_bw": 64, "nvlink_bw": 600
         },
     }
@@ -223,6 +223,19 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
             'FP16A': 'ref_fp16'
         }
 
+        prec_ref_mappings = {
+            'double': 'ref_fp64_tensor',
+            'single': 'ref_tf32_tensor',
+            'half': 'ref_fp16_tensor'
+        }
+
+        prec_target_mappings = {
+            'double': 'target_fp64_tensor',
+            'single': 'target_tf32_tensor',
+            'half': 'target_fp16_tensor'
+        }
+
+
         t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
                                     metric_values[metrics.index('FP64A')] + 
                                     metric_values[metrics.index('FP32A')] + 
@@ -239,10 +252,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
 
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) +
-                            sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                            sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                            sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec[prec_ref_mappings[precision]] / target_gpu_spec[prec_target_mappings[precision]]) +
+                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
         t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
 
         t_roofline_target_interleave = max(t_flop_target, t_dram_target)
@@ -343,6 +356,8 @@ def main():
                         choices=['A100-40', 'A100-80', 'A40', 'H100', 'Rubin'], help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
+    parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['double', 'single', 'half'],
+                        help='Specify the precision type: double (FP64), single (FP32), half (FP16), or tensor (Tensor ops). Default: single')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, required=True,
                         help='indicate the estimated flops utlization when bound swtich')
     parser.add_argument('-mu', '--mem_util', action='store', type=float, required=True,
@@ -359,13 +374,17 @@ def main():
     target_gpu_arch = args.target_gpu_architect
     flop_util = args.flop_util # such as 0.3
     mem_util = args.mem_util # such as 0.33
+    precision = args.precision
 
     profiled_df = process_file(dcgm_metric_file, metrics)
     
     perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch)
     
     if target_gpu_arch is not None:
-        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, flop_util, mem_util)
+        perf_predict(profiled_df, metrics, 
+                     overall_runtime_ms, sample_interval_ms, start_ts, end_ts, 
+                     ref_gpu_arch, target_gpu_arch, precision,
+                     flop_util, mem_util)
 
 
 if __name__=="__main__":
