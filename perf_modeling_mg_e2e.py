@@ -345,7 +345,9 @@ def perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts,
             t_total_list_compute = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-    return t_total_list_compute
+        return t_total_list_compute
+
+    return t_total_list_finish
 
 
 def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, gpu_arch):
@@ -544,7 +546,9 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
             t_total_switch_target_list_compute = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-    return t_total_interleave_target_list_compute, t_total_bursty_target_list_compute, t_total_switch_target_list_compute
+        return t_total_interleave_target_list_compute, t_total_bursty_target_list_compute, t_total_switch_target_list_compute
+
+    return t_total_interleave_target_list_finish, t_total_bursty_target_list_finish, t_total_switch_target_list_finish
 
 
 def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util, mem_util):

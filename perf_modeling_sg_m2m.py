@@ -137,8 +137,11 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
             t_total_list_compute = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-    print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_compute):0.2f}")
-
+        print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_compute):0.2f}")
+        return 
+    
+    print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
+    
 
 def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target):
     balance_ref = ref_gpu_spec['ref_fp64'] * 1000 / ref_gpu_spec['ref_mem_bw']
@@ -329,9 +332,14 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
             t_total_switch_target_list_compute = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_compute):0.2f}")
-    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_compute):0.2f}")
-    print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_compute):0.2f}")
+        print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_compute):0.2f}")
+        print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_compute):0.2f}")
+        print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_compute):0.2f}")
+        return 
+    
+    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_finish):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_finish):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_finish):0.2f}")
 
 
 def main():
