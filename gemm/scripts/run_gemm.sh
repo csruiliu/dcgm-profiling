@@ -32,7 +32,7 @@ export DCGM_SAMPLE_RATE=1000
 for prec in D S H; do
 #run the application:
 start=$(date +%s.%N)
-dcgm_delay=${DCGM_SAMPLE_RATE} srun --cpu_bind=cores ./wrap_dcgmi.sh ./gemm.x 65536 500 1.0 1.0 $prec \
+dcgm_delay=${DCGM_SAMPLE_RATE} srun --cpu_bind=cores ./wrap_dcgmi.sh ./gemm.x 32768 700 1.0 1.0 $prec \
 	> ${RESULTS_DIR}/"$prec"gemm-${SLURM_JOBID}.dcgmi
 end=$(date +%s.%N)
 elapsed=$(printf "%s - %s\n" $end $start | bc -l)
