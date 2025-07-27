@@ -296,8 +296,9 @@ def process_files(num_gpu, dcgm_input, metric_names):
     return profiled_df
 
 
-def perf_modeling_per_gpu(df, metrics, finish_idx, sample_intv, hw_pcie_gb, hw_nvlink_gb):
+def perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, hw_pcie_gb, hw_nvlink_gb):
     t_total_list = list()
+    sample_intv = sample_interval_ms / 1000
 
     for row in df.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
@@ -328,13 +329,28 @@ def perf_modeling_per_gpu(df, metrics, finish_idx, sample_intv, hw_pcie_gb, hw_n
     else:
         t_total_list_finish = t_total_list
 
-    return t_total_list_finish
+    if start_ts is not None or end_ts is not None:
+        start_idx = 0
+        end_idx = len(t_total_list_finish)
+
+        if start_ts is not None:
+            start_idx = max(0, int(start_ts / sample_interval_ms))
+        
+        if end_ts is not None:
+            end_idx = min(len(t_total_list_finish), int(end_ts / sample_interval_ms))
+        
+        if start_idx < end_idx:
+            t_total_list_compute = t_total_list_finish[start_idx:end_idx]
+        else:
+            t_total_list_compute = []
+            raise ValueError("End Timestamp is earlier than Start Timestamp")
+
+    return t_total_list_compute
 
 
-def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, gpu_arch):
-    sample_interval = sample_interval_ms / 1000
+def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, gpu_arch):
     finish_idx = int(overall_runtime_ms / sample_interval_ms)
-
+    
     if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
         hw_pcie_gb = 64
         hw_nvlink_gb = 600
@@ -344,7 +360,7 @@ def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_
     t_total_dict = dict()
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_totals = perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval, hw_pcie_gb, hw_nvlink_gb)
+            t_totals = perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, hw_pcie_gb, hw_nvlink_gb)
             t_total_dict[f"GPU{i}"] = t_totals
         else:
             raise ValueError("The total time list is empty")
@@ -397,10 +413,12 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_
     return bound_ref, bound_target
 
 
-def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec, flop_util_bound_switch, mem_util_bound_switch):    
+def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, ref_gpu_spec, target_gpu_spec, precision, flop_util_bound_switch, mem_util_bound_switch):    
     t_total_bursty_target_list = list()
     t_total_interleave_target_list = list()
     t_total_switch_target_list = list()
+
+    sample_intv = sample_interval_ms / 1000
 
     for row in df.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
@@ -421,6 +439,18 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
             'FP16A': 'ref_fp16'
         }
 
+        prec_ref_mappings = {
+            'double': 'ref_fp64_tensor',
+            'single': 'ref_tf32_tensor',
+            'half': 'ref_fp16_tensor'
+        }
+
+        prec_target_mappings = {
+            'double': 'target_fp64_tensor',
+            'single': 'target_tf32_tensor',
+            'half': 'target_fp16_tensor'
+        }
+
         t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
                                     metric_values[metrics.index('FP64A')] + 
                                     metric_values[metrics.index('FP32A')] + 
@@ -438,7 +468,7 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
         
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec["ref_fp64_tensor"] / target_gpu_spec["target_fp64_tensor"]) + 
+        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec[prec_ref_mappings[precision]] / target_gpu_spec[prec_target_mappings[precision]]) +
                          sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
                          sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
                          sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
@@ -494,29 +524,48 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, tar
         t_total_bursty_target_list_finish = t_total_bursty_target_list
         t_total_switch_target_list_finish = t_total_switch_target_list
 
-    return t_total_interleave_target_list_finish, t_total_bursty_target_list_finish, t_total_switch_target_list_finish
+    if start_ts is not None or end_ts is not None:
+        start_idx = 0
+        end_idx = len(t_total_interleave_target_list_finish)
+
+        if start_ts is not None:
+            start_idx = max(0, int(start_ts / sample_interval_ms))
+        
+        if end_ts is not None:
+            end_idx = min(len(t_total_interleave_target_list_finish), int(end_ts / sample_interval_ms))
+        
+        if start_idx < end_idx:
+            t_total_interleave_target_list_compute = t_total_interleave_target_list_finish[start_idx:end_idx]
+            t_total_bursty_target_list_compute = t_total_bursty_target_list_finish[start_idx:end_idx]
+            t_total_switch_target_list_compute = t_total_switch_target_list_finish[start_idx:end_idx]
+        else:
+            t_total_interleave_target_list_compute = []
+            t_total_bursty_target_list_compute = []
+            t_total_switch_target_list_compute = []
+            raise ValueError("End Timestamp is earlier than Start Timestamp")
+
+    return t_total_interleave_target_list_compute, t_total_bursty_target_list_compute, t_total_switch_target_list_compute
 
 
-def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util, mem_util):
-    sample_intv = sample_interval_ms / 1000
+def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util, mem_util):
     finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
 
     # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
     GPU_SPECS = {
         "A100-40": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
             "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
         },
         "A100-80": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156,
+            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
             "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
         },
         "A40": {
-            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8,
+            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
             "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
         },
         "H100": {  # H100 SXM (default)
-            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 494.7,
+            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 494.7,
             "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
         }
     }
@@ -539,7 +588,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
 
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_total_interleaved, t_total_bursty, t_total_switch = pref_predict_per_gpu(df, metrics, finish_idx, sample_intv, ref_gpu_spec, target_gpu_spec, flop_util, mem_util)
+            t_total_interleaved, t_total_bursty, t_total_switch = pref_predict_per_gpu(df, metrics, 
+                                                                                       finish_idx, sample_interval_ms, start_ts, end_ts, 
+                                                                                       ref_gpu_spec, target_gpu_spec, precision, 
+                                                                                       flop_util, mem_util)
             t_total_bursty_dict[f"GPU{i}"] = t_total_bursty
             t_total_interleaved_dict[f"GPU{i}"] = t_total_interleaved
             t_total_switch_dict[f"GPU{i}"] = t_total_switch
@@ -612,6 +664,10 @@ def main():
                         help='indicate number of gpus used for computation')    
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
                         help='indicate the timestamp for overall runtime in milliseconds')
+    parser.add_argument('-st', '--start_timestamp', action='store', type=int, required=False, default=None,
+                        help='Start timestamp for analysis window (in milliseconds)')
+    parser.add_argument('-et', '--end_timestamp', action='store', type=int, required=False, default=None,
+                        help='End timestamp for analysis window (in milliseconds)')
     parser.add_argument('-s', '--sample_interval_ms', action='store', type=int, required=True,
                         help='indicate the sample interval in milliseconds')
     parser.add_argument('-a', '--aggregate_interval_ms', action='store', type=int, required=True,
@@ -622,6 +678,8 @@ def main():
                         choices=['A100-40', 'A100-80', 'A40', 'H100'], help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
+    parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['double', 'single', 'half'],
+                        help='Specify the precision type: double (FP64), single (FP32), half (FP16), or tensor (Tensor ops). Default: single')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, required=True,
                         help='indicate the estimated flops utlization when bound swtich')
     parser.add_argument('-mu', '--mem_util', action='store', type=float, required=True,
@@ -631,6 +689,8 @@ def main():
     dcgm_input = args.dcgm_input
     num_gpu = args.num_gpu
     overall_runtime_ms = args.overall_runtime_ms
+    start_ts = args.start_timestamp
+    end_ts = args.end_timestamp
     sample_interval_ms = args.sample_interval_ms
     agg_interval_ms = args.aggregate_interval_ms
     metrics = args.metrics
@@ -638,13 +698,17 @@ def main():
     target_gpu_arch = args.target_gpu_architect
     flop_util = args.flop_util # such as 0.3
     mem_util = args.mem_util # such as 0.33
+    precision = args.precision
 
     profiled_df = process_files(num_gpu, dcgm_input, metrics)
 
-    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch)
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch)
     
     if target_gpu_arch is not None:
-        perf_predict(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, ref_gpu_arch, target_gpu_arch, flop_util, mem_util)
+        perf_predict(profiled_df, metrics, 
+                     overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, 
+                     ref_gpu_arch, target_gpu_arch, precision, 
+                     flop_util, mem_util)
     
 
 if __name__=="__main__":
