@@ -38,17 +38,20 @@ public:
     }
   }
   
-  static void print_results() {
+  static void print_results(int N, int repeats, double alpha, double beta) {
     std::cout << "\n=== Timing Results ===" << std::endl;
     
     double total = 0;
+    double compute_time = 0;
     const std::vector<std::pair<std::string, double>>& timings = get_timings();
     
     // Calculate total time
     for (std::vector<std::pair<std::string, double>>::const_iterator it = timings.begin(); it != timings.end(); ++it) {
       if (it->first == "Total Execution") {
         total = it->second;
-        break;
+      }
+      if (it->first == "Compute GEMM") {
+        compute_time = it->second;
       }
     }
     
@@ -114,6 +117,55 @@ public:
     std::cout << std::left << std::setw(30) << "Total:"
               << std::right << std::setw(6) << static_cast<long>(total)
               << std::setw(4) << " ms" << std::endl;
+
+    /*
+     * Printout Performance Results
+    */
+    long long flops_per_op = 0;
+    
+    // For C = A * B, where A, B, C are N x N matrices
+    // Each of the N×N elements in result requires N multiplications + (N-1) additions
+    // Total FLOPs = N×N×(N + (N-1)) = N×N×(2N-1) ≈ 2*N^3 - N^2 for large N
+    flops_per_op += 2LL * N * N * N - (N * N);
+
+    // 2. Scaling by alpha: alpha * (op(A) * op(B))
+    //    If alpha != 1.0, we need N×N additional multiplications
+    if (alpha != 1.0) {
+        flops_per_op += N * N;
+    }
+    
+    // 3. Scaling by beta: beta * C
+    //    If beta != 0.0, we need N×N additional multiplications
+    if (beta != 0.0) {
+        flops_per_op += N * N;
+    }
+    
+    // 4. Final addition: (alpha * op(A) * op(B)) + (beta * C)
+    //    If beta != 0.0, we need N×N additional additions
+    if (beta != 0.0) {
+        flops_per_op += N * N;
+    }
+
+    long long total_flops = flops_per_op * repeats;
+    double flops_per_second = total_flops / compute_time;
+    
+    std::cout << "\n=== Performance Results ===" << std::endl;
+    std::cout << "Matrix size: " << N << " x " << N << std::endl;
+    std::cout << "Repeats: " << repeats << std::endl;
+    std::cout << "Total FLOPs: " << total_flops << std::endl;
+    std::cout << "Total Computation Time: " << std::fixed << std::setprecision(3) << compute_time << " ms" << std::endl;
+    
+    // Display in appropriate units
+    if (flops_per_second >= 1e12) {
+      std::cout << "Performance: " << std::fixed << std::setprecision(2) 
+                << flops_per_second / 1e12 << " TFLOPs" << std::endl;
+    } else if (flops_per_second >= 1e9) {
+      std::cout << "Performance: " << std::fixed << std::setprecision(2) 
+                << flops_per_second / 1e9 << " GFLOPs" << std::endl;
+    } else {
+      std::cout << "Performance: " << std::fixed << std::setprecision(2) 
+                << flops_per_second / 1e6 << " MFLOPs" << std::endl;
+    }
   }
   
   static void clear() { 
@@ -297,7 +349,7 @@ public:
     d_matrixA = d_matrixB = d_matrixC = nullptr;
     h_matrixA = h_matrixB = h_matrixC = nullptr;
   }
-  
+
 private:
   void handle_cuda_error(cudaError_t error, const std::string& operation) {
     if (error != cudaSuccess) {
@@ -329,6 +381,7 @@ bool run_gemm(int N, int repeats, T alpha, T beta, const std::string& precision_
            gemm.setup_cublas() &&
            gemm.compute_gemm(repeats, alpha, beta) &&
            gemm.gather_results();
+
 }
 
 int main(int argc, char* argv[]) {
@@ -379,6 +432,6 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  Timer::print_results();
+  Timer::print_results(N, repeats, alpha, beta);
   return 0;
 }
