@@ -147,7 +147,7 @@ public:
     }
 
     long long total_flops = flops_per_op * repeats;
-    double flops_per_second = total_flops / compute_time;
+    double flops_per_second = total_flops / compute_time / 1000;
     
     std::cout << "\n=== Performance Results ===" << std::endl;
     std::cout << "Matrix size: " << N << " x " << N << std::endl;
