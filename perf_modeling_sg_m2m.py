@@ -4,6 +4,39 @@ import re
 import numpy as np
 
 
+# I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
+GPU_SPECS = {
+    "A100-40": {
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
+        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
+    },
+    "A100-80": {
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
+        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
+    },
+    "A40": {
+        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
+        "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
+    },
+    "H100": {  # H100 SXM (default)
+        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989,
+        "fp16": 133.8, "fp16_tensor": 1979, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
+    },
+    "Rubin": {
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 312, "tf32_tensor": 156,
+        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1944, "pcie_bw": 64, "nvlink_bw": 600
+    },
+}
+
+def get_gpu_specs(gpu_arch, prefix):
+    """Get GPU specifications with appropriate prefix."""
+    try:
+        specs = GPU_SPECS.get(gpu_arch)
+        return {f"{prefix}_{key}": value for key, value in specs.items()}
+    except KeyError:
+        print("GPU architect is not found in GPU SPEC DICT")
+
+
 # Define a custom argument type for a list of strings
 def list_of_strings(arg):
     return arg.split(',')
@@ -88,7 +121,9 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         raise ValueError("Reference GPU arch is not recognized")
 
     t_total_list = list()
-    
+    t_flop_list = list()
+    t_dram_list = list()
+
     for row in profiled_df.itertuples(index=False):
         # row is a namedtuple, you can access columns via row.<colname>
         # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
@@ -97,8 +132,11 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         
         t_flop = sample_intv * (metric_values[metrics.index('TENSO')] + metric_values[metrics.index('FP64A')] + 
                                metric_values[metrics.index('FP32A')] + metric_values[metrics.index('FP16A')])  
-        t_dram = sample_intv * metric_values[metrics.index('DRAMA')]
+        t_flop_list.append(t_flop)
         
+        t_dram = sample_intv * metric_values[metrics.index('DRAMA')]
+        t_dram_list.append(t_dram)
+
         t_roofline = max(t_flop, t_dram)
         
         t_otherGPU = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline)
@@ -118,8 +156,14 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     
     if finish_idx < len(t_total_list):
         t_total_list_finish = t_total_list[:finish_idx]
+        t_flop_list = t_flop_list[:finish_idx]
+        t_dram_list = t_dram_list[:finish_idx]
     else:
         t_total_list_finish = t_total_list
+        t_flop_list_finish = t_flop_list
+        t_dram_list_finish = t_dram_list
+
+    ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
@@ -133,15 +177,28 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         
         if start_idx < end_idx:
             t_total_list_compute = t_total_list_finish[start_idx:end_idx]
+            t_flop_list_compute = t_flop_list[start_idx:end_idx]
+            t_dram_list_compute = t_dram_list[start_idx:end_idx]
         else:
             t_total_list_compute = []
+            t_flop_list_compute = []
+            t_dram_list_compute = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
-
+        
+        flop = np.mean(t_flop_list_compute) / sample_intv * ref_gpu_spec["ref_fp64_tensor"]
+        dram = np.mean(t_dram_list_compute) / sample_intv * ref_gpu_spec["ref_mem_bw"]
+        print(f"Estimate TFLOPS: {flop:0.2f}")
+        print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
         print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_compute):0.2f}")
         return 
-    
+
+    flop = np.mean(t_flop_list_finish) * ref_gpu_spec["ref_fp64_tensor"]
+    dram = np.mean(t_dram_list_finish) / sample_intv * ref_gpu_spec["ref_mem_bw"]
+    print(f"Estimate TFLOPS: {flop:0.2f}")
+    print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
     print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
-    
+    return
+
 
 def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target):
     balance_ref = ref_gpu_spec['ref_fp64'] * 1000 / ref_gpu_spec['ref_mem_bw']
@@ -166,39 +223,7 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_
 
 def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util_bound_switch, mem_util_bound_switch):
     sample_intv = sample_interval_ms / 1000
-    
-    # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
-    GPU_SPECS = {
-        "A100-40": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
-            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
-        },
-        "A100-80": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
-            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
-        },
-        "A40": {
-            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
-            "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
-        },
-        "H100": {  # H100 SXM (default)
-            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989,
-            "fp16": 133.8, "fp16_tensor": 1979, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
-        },
-        "Rubin": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 312, "tf32_tensor": 156,
-            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1944, "pcie_bw": 64, "nvlink_bw": 600
-        },
-    }
 
-    def get_gpu_specs(gpu_arch, prefix):
-        """Get GPU specifications with appropriate prefix."""
-        try:
-            specs = GPU_SPECS.get(gpu_arch)
-            return {f"{prefix}_{key}": value for key, value in specs.items()}
-        except KeyError:
-            print("GPU architect is not found in GPU SPEC DICT")
-        
     # Get specifications for both reference and target GPUs
     ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
     target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
