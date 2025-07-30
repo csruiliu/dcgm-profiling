@@ -182,8 +182,16 @@ private:
   }
 };
 
-// Convenient macro for timing scopes
+// Convenient macro for timing scopes and use line number
 #define TIME_SCOPE(name) Timer timer_##__LINE__(name)
+
+// Printout cuda error message
+void handle_cuda_error(cudaError_t error, const std::string& operation) {
+  if (error != cudaSuccess) {
+    std::cerr << operation << " failed: " << cudaGetErrorString(error) << std::endl;
+    exit(1);
+  }
+}
 
 bool set_gpu_device(int gpu_id) {
   TIME_SCOPE("GPU Device Setup");
@@ -191,7 +199,8 @@ bool set_gpu_device(int gpu_id) {
   // Check number of available GPUs
   int device_count;
   cudaError_t err = cudaGetDeviceCount(&device_count);
-  
+  handle_cuda_error(err, "cudaGetDeviceCount");
+
   if (device_count == 0) {
     std::cerr << "No CUDA-capable devices found!" << std::endl;
     return false;
@@ -204,10 +213,12 @@ bool set_gpu_device(int gpu_id) {
   
   // Set the device
   err = cudaSetDevice(gpu_id);
+  handle_cuda_error(err, "cudaSetDevice");
   
   // Get and print device properties
   cudaDeviceProp prop;
   err = cudaGetDeviceProperties(&prop, gpu_id);
+  handle_cuda_error(err, "cudaGetDeviceProperties");
   
   std::cout << "\n=== GPU Device Information ===" << std::endl;
   std::cout << "Using GPU " << gpu_id << ": " << prop.name << std::endl;
@@ -390,13 +401,6 @@ public:
   }
 
 private:
-  void handle_cuda_error(cudaError_t error, const std::string& operation) {
-    if (error != cudaSuccess) {
-      std::cerr << operation << " failed: " << cudaGetErrorString(error) << std::endl;
-      exit(1);
-    }
-  }
-  
   void handle_cublas_error(cublasStatus_t status, const std::string& operation) {
     if (status != CUBLAS_STATUS_SUCCESS) {
       std::cerr << operation << " failed with cuBLAS error " << status << std::endl;
