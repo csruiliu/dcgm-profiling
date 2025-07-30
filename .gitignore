@@ -4,6 +4,7 @@
 **/*.out
 **/*.zip
 **/results
+**/figures
 
 # Prerequisites
 *.d
