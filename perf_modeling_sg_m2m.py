@@ -192,7 +192,7 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_compute):0.2f}")
         return 
 
-    flop = np.mean(t_flop_list_finish) * ref_gpu_spec["ref_fp64_tensor"]
+    flop = np.mean(t_flop_list_finish) / sample_intv * ref_gpu_spec["ref_fp64_tensor"]
     dram = np.mean(t_dram_list_finish) / sample_intv * ref_gpu_spec["ref_mem_bw"]
     print(f"Estimate TFLOPS: {flop:0.2f}")
     print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
