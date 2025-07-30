@@ -185,6 +185,45 @@ private:
 // Convenient macro for timing scopes
 #define TIME_SCOPE(name) Timer timer_##__LINE__(name)
 
+bool set_gpu_device(int gpu_id) {
+  TIME_SCOPE("GPU Device Setup");
+  
+  // Check number of available GPUs
+  int device_count;
+  cudaError_t err = cudaGetDeviceCount(&device_count);
+  
+  if (device_count == 0) {
+    std::cerr << "No CUDA-capable devices found!" << std::endl;
+    return false;
+  }
+  
+  if (gpu_id >= device_count || gpu_id < 0) {
+    std::cerr << "Invalid GPU ID: " << gpu_id << ". Available GPUs: 0-" << (device_count-1) << std::endl;
+    return false;
+  }
+  
+  // Set the device
+  err = cudaSetDevice(gpu_id);
+  
+  // Get and print device properties
+  cudaDeviceProp prop;
+  err = cudaGetDeviceProperties(&prop, gpu_id);
+  
+  std::cout << "\n=== GPU Device Information ===" << std::endl;
+  std::cout << "Using GPU " << gpu_id << ": " << prop.name << std::endl;
+  std::cout << "Compute Capability: " << prop.major << "." << prop.minor << std::endl;
+  std::cout << "Total Global Memory: " << (prop.totalGlobalMem / (1024*1024)) << " MB" << std::endl;
+  std::cout << "Max Threads per Block: " << prop.maxThreadsPerBlock << std::endl;
+  std::cout << "Multiprocessors: " << prop.multiProcessorCount << std::endl;
+  std::cout << "Memory Clock Rate: " << (prop.memoryClockRate / 1000) << " MHz" << std::endl;
+  std::cout << "Memory Bus Width: " << prop.memoryBusWidth << " bits" << std::endl;
+  std::cout << "Peak Memory Bandwidth: " << std::fixed << std::setprecision(1) 
+            << (2.0 * prop.memoryClockRate * (prop.memoryBusWidth / 8) / 1.0e6) << " GB/s" << std::endl;
+  std::cout << "==============================" << std::endl;
+  
+  return true;
+}
+
 namespace gemm {
 
 enum class Precision { SINGLE = 'S', DOUBLE = 'D', HALF = 'H' };
@@ -386,8 +425,9 @@ bool run_gemm(int N, int repeats, T alpha, T beta, const std::string& precision_
 
 int main(int argc, char* argv[]) {
 
-  if (argc != 6) {
+  if (argc != 7) {
     std::cout << "Usage: " << argv[0] << " <N> <repeats> <alpha> <beta> <precision(S/D/H)>" << std::endl;
+    std::cout << "  GPU_ID: GPU device ID (0, 1, 2, ...)" << std::endl;
     std::cout << "  N: Matrix size (NxN)" << std::endl;
     std::cout << "  repeats: Number of GEMM iterations" << std::endl;
     std::cout << "  alpha, beta: GEMM coefficients" << std::endl;
@@ -395,13 +435,20 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   
-  int N = std::atoi(argv[1]);
-  int repeats = std::atoi(argv[2]);
-  double alpha = std::atof(argv[3]);
-  double beta = std::atof(argv[4]);
-  char precision = argv[5][0];
+  int gpu_id = std::atoi(argv[1]);
+  int N = std::atoi(argv[2]);
+  int repeats = std::atoi(argv[3]);
+  double alpha = std::atof(argv[4]);
+  double beta = std::atof(argv[5]);
+  char precision = argv[6][0];
+
+    // MODIFIED: Set GPU device before any CUDA operations
+  if (!set_gpu_device(gpu_id)) {
+    return 1;
+  }
 
   std::cout << "Starting distributed GEMM with:" << std::endl;
+  std::cout << "  GPU ID: " << gpu_id << std::endl;
   std::cout << "  Matrix size: " << N << "x" << N << std::endl;
   std::cout << "  Repeats: " << repeats << std::endl;
   std::cout << "  Precision: " << precision << std::endl;
