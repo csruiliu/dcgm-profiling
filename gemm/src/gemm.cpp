@@ -245,7 +245,8 @@ struct CublasTraits;
 template<>
 struct CublasTraits<float> {
   static constexpr auto gemm_func = &cublasSgemm;
-  static constexpr auto math_mode = CUBLAS_TF32_TENSOR_OP_MATH;
+  // static constexpr auto math_mode = CUBLAS_TF32_TENSOR_OP_MATH;
+  static constexpr auto math_mode = CUBLAS_DEFAULT_MATH;
 };
 
 template<>
@@ -329,7 +330,7 @@ public:
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
     
-    for (int i = 0; i < N_ * N_; ++i) {
+    for (long i = 0; i < N_ * N_; ++i) {
       h_matrixA[i] = static_cast<T>(dis(gen));
       h_matrixB[i] = static_cast<T>(dis(gen));
       h_matrixC[i] = static_cast<T>(dis(gen));
