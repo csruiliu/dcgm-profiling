@@ -313,6 +313,47 @@ public:
   }
 
   bool allocate_host_matrices() {
+    TIME_SCOPE("Matrices Allocation and Initialization on Host");
+    std::cout << "Allocating Matrices on Host" << std::endl;
+    
+    // Use regular malloc instead of pinned memory
+    h_matrixA = static_cast<T*>(malloc(sizeof(T) * N_ * N_));
+    if (!h_matrixA) {
+        std::cerr << "malloc h_matrixA failed" << std::endl;
+        return false;
+    }
+    
+    h_matrixB = static_cast<T*>(malloc(sizeof(T) * N_ * N_));
+    if (!h_matrixB) {
+        std::cerr << "malloc h_matrixB failed" << std::endl;
+        free(h_matrixA);
+        h_matrixA = nullptr;
+        return false;
+    }
+    
+    h_matrixC = static_cast<T*>(malloc(sizeof(T) * N_ * N_));
+    if (!h_matrixC) {
+        std::cerr << "malloc h_matrixC failed" << std::endl;
+        free(h_matrixA);
+        free(h_matrixB);
+        h_matrixA = h_matrixB = nullptr;
+        return false;
+    }
+    
+    // Initialize matrices with random values
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
+    
+    for (long i = 0; i < N_ * N_; ++i) {
+        h_matrixA[i] = static_cast<T>(dis(gen));
+        h_matrixB[i] = static_cast<T>(dis(gen));
+        h_matrixC[i] = static_cast<T>(dis(gen));
+    }
+    return true;
+  } 
+  /*
+  bool allocate_host_matrices() {
     TIME_SCOPE("Matrices Allocation (Pinned) and Initialization on Host");
     std::cout << "Allocating Matrics on Host" << std::endl;
     // Use pinned memory for better transfer performance
@@ -337,7 +378,7 @@ public:
     }
     return true;
   }
-
+  */
   bool allocate_gpu_matrices() {
     TIME_SCOPE("Matrices Allocation on GPU");
     std::cout << "Allocating Matrics on GPU" << std::endl;
@@ -392,10 +433,15 @@ public:
     cudaFree(d_matrixA);
     cudaFree(d_matrixB);
     cudaFree(d_matrixC);
+    
+    /*
     cudaFreeHost(h_matrixA);
     cudaFreeHost(h_matrixB);
     cudaFreeHost(h_matrixC);
-          
+    */
+    free(h_matrixA); 
+    free(h_matrixB);
+    free(h_matrixC);
     // Reset pointers
     d_matrixA = d_matrixB = d_matrixC = nullptr;
     h_matrixA = h_matrixB = h_matrixC = nullptr;
