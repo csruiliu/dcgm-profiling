@@ -240,7 +240,50 @@ public:
     ~GemmMPI() {
         cleanup();
     }
-    
+
+    bool allocate_host_matrices() {
+        TIME_SCOPE("Matrices Allocation and Initialization on Host");
+        if (mpi_rank_ == 0) {
+            std::cout << "Allocating Matrics on Host [Rank 0]" << std::endl;
+            // Use regular malloc for host memory allocation
+            full_A_host_ = static_cast<T*>(malloc(sizeof(T) * N_ * N_));
+            if (full_A_host_ == nullptr) {
+                std::cerr << "Failed to allocate memory for full_A_host_" << std::endl;
+                return false;
+            }
+            
+            B_host_ = static_cast<T*>(malloc(sizeof(T) * N_ * N_));
+            if (B_host_ == nullptr) {
+                std::cerr << "Failed to allocate memory for B_host_" << std::endl;
+                free(full_A_host_);
+                return false;
+            }
+            
+            full_C_host_ = static_cast<T*>(malloc(sizeof(T) * N_ * N_));
+            if (full_C_host_ == nullptr) {
+                std::cerr << "Failed to allocate memory for full_C_host_" << std::endl;
+                free(full_A_host_);
+                free(B_host_);
+                return false;
+            }
+            
+            // Initialize matrices with random values
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
+            
+            for (int i = 0; i < N_ * N_; ++i) {
+                full_A_host_[i] = static_cast<T>(dis(gen));
+                B_host_[i] = static_cast<T>(dis(gen));
+                full_C_host_[i] = static_cast<T>(dis(gen));
+            }
+            cudaDeviceSynchronize();
+        }
+        MPI_Barrier(MPI_COMM_WORLD); // Wait for rank 0 to finish
+        return true;
+    }
+
+    /*
     bool allocate_host_matrices() {
         TIME_SCOPE("Matrices Allocation (Pinned) and Initialization on Host");
         if (mpi_rank_ == 0) {
@@ -270,7 +313,8 @@ public:
         MPI_Barrier(MPI_COMM_WORLD); // Wait for rank 0 to finish
         return true;
     }
-    
+    */
+   
     bool allocate_gpu_matrices() {
         TIME_SCOPE("Matrices Allocation on GPU");
         if (mpi_rank_ == 0) {
@@ -414,9 +458,12 @@ private:
         cudaFree(local_C_gpu_);
         
         if (mpi_rank_ == 0) {
-            cudaFreeHost(full_A_host_);
-            cudaFreeHost(B_host_);
-            cudaFreeHost(full_C_host_);
+            free(full_A_host_); 
+            free(B_host_);
+            free(full_C_host_);
+            //cudaFreeHost(full_A_host_);
+            //cudaFreeHost(B_host_);
+            //cudaFreeHost(full_C_host_);
         }
         
         // Reset pointers
