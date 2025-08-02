@@ -176,27 +176,27 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
             end_idx = min(len(t_total_list_finish), int(end_ts / sample_interval_ms))
         
         if start_idx < end_idx:
-            t_total_list_compute = t_total_list_finish[start_idx:end_idx]
-            t_flop_list_compute = t_flop_list[start_idx:end_idx]
-            t_dram_list_compute = t_dram_list[start_idx:end_idx]
+            t_total_list_slice = t_total_list_finish[start_idx:end_idx]
+            t_flop_list_slice = t_flop_list[start_idx:end_idx]
+            t_dram_list_slice = t_dram_list[start_idx:end_idx]
         else:
-            t_total_list_compute = []
-            t_flop_list_compute = []
-            t_dram_list_compute = []
+            t_total_list_slice = []
+            t_flop_list_slice = []
+            t_dram_list_slice = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
         
-        flop = np.mean(t_flop_list_compute) / sample_intv * ref_gpu_spec["ref_fp64_tensor"]
-        dram = np.mean(t_dram_list_compute) / sample_intv * ref_gpu_spec["ref_mem_bw"]
+        flop = np.mean(t_flop_list_slice) / sample_intv * ref_gpu_spec["ref_fp64_tensor"]
+        dram = np.mean(t_dram_list_slice) / sample_intv * ref_gpu_spec["ref_mem_bw"]
         print(f"Estimate TFLOPS: {flop:0.2f}")
         print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
-        print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_compute):0.2f}")
+        print(f"Estimate Runtime of Analysis Window On Reference Hardware: {sum(t_total_list_slice):0.2f}")
         return 
 
     flop = np.mean(t_flop_list_finish) / sample_intv * ref_gpu_spec["ref_fp64_tensor"]
     dram = np.mean(t_dram_list_finish) / sample_intv * ref_gpu_spec["ref_mem_bw"]
     print(f"Estimate TFLOPS: {flop:0.2f}")
     print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
-    print(f"Estimate Compute Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
+    print(f"Estimate Overall Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
     return
 
 
@@ -228,8 +228,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
     ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
     target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
     
-    t_total_bursty_target_list = list()
-    t_total_interleave_target_list = list()
+    t_total_overlap_target_list = list()
+    t_total_sequential_target_list = list()
     t_total_switch_target_list = list()
 
     for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
@@ -285,9 +285,9 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
                          sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
         t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
 
-        t_roofline_target_interleave = max(t_flop_target, t_dram_target)
+        t_roofline_target_overlap = max(t_flop_target, t_dram_target)
 
-        t_roofline_target_bursty = t_flop_target + t_dram_target
+        t_roofline_target_sequential = t_flop_target + t_dram_target
 
         bound_ref, bound_target = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target)
 
@@ -314,56 +314,56 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
 
         t_otherNode_target = t_otherNode_ref
 
-        t_total_target_bursty = t_roofline_target_bursty + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_target_interleave = t_roofline_target_interleave + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_target_switch = t_roofline_target_switch + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_bursty_target_list.append(t_total_target_bursty)    
-
-        t_total_interleave_target_list.append(t_total_target_interleave) 
+        t_total_overlap_target_list.append(t_total_target_overlap)
+        
+        t_total_sequential_target_list.append(t_total_target_sequential)    
 
         t_total_switch_target_list.append(t_total_target_switch)
 
     finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
     
-    if finish_idx < len(t_total_interleave_target_list):
-        t_total_interleave_target_list_finish = t_total_interleave_target_list[:finish_idx]
-        t_total_bursty_target_list_finish = t_total_bursty_target_list[:finish_idx]
+    if finish_idx < len(t_total_overlap_target_list):
+        t_total_overlap_target_list_finish = t_total_overlap_target_list[:finish_idx]
+        t_total_sequential_target_list_finish = t_total_sequential_target_list[:finish_idx]
         t_total_switch_target_list_finish = t_total_switch_target_list[:finish_idx]
     else:
-        t_total_interleave_target_list_finish = t_total_interleave_target_list
-        t_total_bursty_target_list_finish = t_total_bursty_target_list
+        t_total_overlap_target_list_finish = t_total_overlap_target_list
+        t_total_sequential_target_list_finish = t_total_sequential_target_list
         t_total_switch_target_list_finish = t_total_switch_target_list
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
-        end_idx = len(t_total_interleave_target_list_finish)
+        end_idx = len(t_total_overlap_target_list_finish)
 
         if start_ts is not None:
             start_idx = max(0, int(start_ts / sample_interval_ms))
         
         if end_ts is not None:
-            end_idx = min(len(t_total_interleave_target_list_finish), int(end_ts / sample_interval_ms))
+            end_idx = min(len(t_total_overlap_target_list_finish), int(end_ts / sample_interval_ms))
         
         if start_idx < end_idx:
-            t_total_interleave_target_list_compute = t_total_interleave_target_list_finish[start_idx:end_idx]
-            t_total_bursty_target_list_compute = t_total_bursty_target_list_finish[start_idx:end_idx]
-            t_total_switch_target_list_compute = t_total_switch_target_list_finish[start_idx:end_idx]
+            t_total_interleave_target_list_slice = t_total_overlap_target_list_finish[start_idx:end_idx]
+            t_total_bursty_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
+            t_total_switch_target_list_slice = t_total_switch_target_list_finish[start_idx:end_idx]
         else:
-            t_total_interleave_target_list_compute = []
-            t_total_bursty_target_list_compute = []
-            t_total_switch_target_list_compute = []
+            t_total_interleave_target_list_slice = []
+            t_total_bursty_target_list_slice = []
+            t_total_switch_target_list_slice = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-        print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_compute):0.2f}")
-        print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_compute):0.2f}")
-        print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_compute):0.2f}")
+        print(f"Estimate Runtime of Analysis Window On Target Hardware [Overlap Scenario]: {sum(t_total_interleave_target_list_slice):0.2f}")
+        print(f"Estimate Runtime of Analysis Window On Target Hardware [Sequential Scenario]: {sum(t_total_bursty_target_list_slice):0.2f}")
+        print(f"Estimate Runtime of Analysis Window On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_slice):0.2f}")
         return 
     
-    print(f"Estimate Runtime On Target Hardware [Interleave Scenario]: {sum(t_total_interleave_target_list_finish):0.2f}")
-    print(f"Estimate Runtime On Target Hardware [Bursty Scenario]: {sum(t_total_bursty_target_list_finish):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_finish):0.2f}")
+    print(f"Estimate Runtime On Target Hardware [Sequential Scenario]: {sum(t_total_sequential_target_list_finish):0.2f}")
     print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_finish):0.2f}")
 
 
@@ -404,8 +404,8 @@ def main():
     end_ts = args.end_timestamp
     ref_gpu_arch = args.ref_gpu_architect
     target_gpu_arch = args.target_gpu_architect
-    flop_util = args.flop_util # such as 0.3
-    mem_util = args.mem_util # such as 0.33
+    flop_util = args.flop_util 
+    mem_util = args.mem_util 
     precision = args.precision
 
     profiled_df = process_file(dcgm_metric_file, metrics)
