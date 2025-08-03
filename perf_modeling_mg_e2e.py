@@ -340,12 +340,12 @@ def perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts,
             end_idx = min(len(t_total_list_finish), int(end_ts / sample_interval_ms))
         
         if start_idx < end_idx:
-            t_total_list_compute = t_total_list_finish[start_idx:end_idx]
+            t_total_list_slice = t_total_list_finish[start_idx:end_idx]
         else:
-            t_total_list_compute = []
+            t_total_list_slice = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-        return t_total_list_compute
+        return t_total_list_slice
 
     return t_total_list_finish
 
@@ -416,8 +416,9 @@ def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_
 
 
 def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, ref_gpu_spec, target_gpu_spec, precision, flop_util_bound_switch, mem_util_bound_switch):    
-    t_total_bursty_target_list = list()
-    t_total_interleave_target_list = list()
+    
+    t_total_overlap_target_list = list()
+    t_total_sequential_target_list = list()
     t_total_switch_target_list = list()
 
     sample_intv = sample_interval_ms / 1000
@@ -476,9 +477,9 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
                          sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
         t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
         
-        t_roofline_target_interleave = max(t_flop_target, t_dram_target)
+        t_roofline_target_overlap = max(t_flop_target, t_dram_target)
 
-        t_roofline_target_bursty = t_flop_target + t_dram_target
+        t_roofline_target_sequential = t_flop_target + t_dram_target
 
         bound_ref, bound_target = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target)
 
@@ -505,50 +506,50 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
         
         t_otherNode_target = t_otherNode_ref
 
-        t_total_target_bursty = t_roofline_target_bursty + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_target_interleave = t_roofline_target_interleave + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_target_switch = t_roofline_target_switch + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_bursty_target_list.append(t_total_target_bursty)    
+        t_total_overlap_target_list.append(t_total_target_overlap) 
 
-        t_total_interleave_target_list.append(t_total_target_interleave) 
+        t_total_sequential_target_list.append(t_total_target_sequential)    
 
         t_total_switch_target_list.append(t_total_target_switch)
     
-    if finish_idx < len(t_total_interleave_target_list):
-        t_total_interleave_target_list_finish = t_total_interleave_target_list[:finish_idx]
-        t_total_bursty_target_list_finish = t_total_bursty_target_list[:finish_idx]
+    if finish_idx < len(t_total_overlap_target_list):
+        t_total_overlap_target_list_finish = t_total_overlap_target_list[:finish_idx]
+        t_total_sequential_target_list_finish = t_total_sequential_target_list[:finish_idx]
         t_total_switch_target_list_finish = t_total_switch_target_list[:finish_idx]
     else:
-        t_total_interleave_target_list_finish = t_total_interleave_target_list
-        t_total_bursty_target_list_finish = t_total_bursty_target_list
+        t_total_overlap_target_list_finish = t_total_overlap_target_list
+        t_total_sequential_target_list_finish = t_total_sequential_target_list
         t_total_switch_target_list_finish = t_total_switch_target_list
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
-        end_idx = len(t_total_interleave_target_list_finish)
+        end_idx = len(t_total_overlap_target_list_finish)
 
         if start_ts is not None:
             start_idx = max(0, int(start_ts / sample_interval_ms))
         
         if end_ts is not None:
-            end_idx = min(len(t_total_interleave_target_list_finish), int(end_ts / sample_interval_ms))
+            end_idx = min(len(t_total_overlap_target_list_finish), int(end_ts / sample_interval_ms))
         
         if start_idx < end_idx:
-            t_total_interleave_target_list_compute = t_total_interleave_target_list_finish[start_idx:end_idx]
-            t_total_bursty_target_list_compute = t_total_bursty_target_list_finish[start_idx:end_idx]
-            t_total_switch_target_list_compute = t_total_switch_target_list_finish[start_idx:end_idx]
+            t_total_overlap_target_list_slice = t_total_overlap_target_list_finish[start_idx:end_idx]
+            t_total_sequential_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
+            t_total_switch_target_list_slice = t_total_switch_target_list_finish[start_idx:end_idx]
         else:
-            t_total_interleave_target_list_compute = []
-            t_total_bursty_target_list_compute = []
-            t_total_switch_target_list_compute = []
+            t_total_overlap_target_list_slice = []
+            t_total_sequential_target_list_slice = []
+            t_total_switch_target_list_slice = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-        return t_total_interleave_target_list_compute, t_total_bursty_target_list_compute, t_total_switch_target_list_compute
+        return t_total_overlap_target_list_slice, t_total_sequential_target_list_slice, t_total_switch_target_list_slice
 
-    return t_total_interleave_target_list_finish, t_total_bursty_target_list_finish, t_total_switch_target_list_finish
+    return t_total_overlap_target_list_finish, t_total_sequential_target_list_finish, t_total_switch_target_list_finish
 
 
 def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util, mem_util):
@@ -586,25 +587,25 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
     ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
     target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
 
-    t_total_bursty_dict = dict()
-    t_total_interleaved_dict = dict()
+    t_total_overlap_dict = dict()
+    t_total_sequential_dict = dict()
     t_total_switch_dict = dict()
 
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_total_interleaved, t_total_bursty, t_total_switch = pref_predict_per_gpu(df, metrics, 
+            t_total_overlap, t_total_sequential, t_total_switch = pref_predict_per_gpu(df, metrics, 
                                                                                        finish_idx, sample_interval_ms, start_ts, end_ts, 
                                                                                        ref_gpu_spec, target_gpu_spec, precision, 
                                                                                        flop_util, mem_util)
-            t_total_bursty_dict[f"GPU{i}"] = t_total_bursty
-            t_total_interleaved_dict[f"GPU{i}"] = t_total_interleaved
+            t_total_overlap_dict[f"GPU{i}"] = t_total_overlap
+            t_total_sequential_dict[f"GPU{i}"] = t_total_sequential
             t_total_switch_dict[f"GPU{i}"] = t_total_switch
         else:
             raise ValueError("The total time list is empty")
 
     # Now compute the max for each row index
     # First, check that all lists are of the same length
-    lengths = [len(lst) for lst in t_total_interleaved_dict.values()]
+    lengths = [len(lst) for lst in t_total_overlap_dict.values()]
     if len(set(lengths)) != 1:
         raise ValueError("Not all GPU t_total lists are of the same length!")
     
@@ -614,32 +615,32 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
     agg_samples = agg_interval_ms // sample_interval_ms
 
     # Transpose the lists and take max of every `agg_samples` samples
-    max_value_bursty_list = []
-    max_value_interleaved_list = []
+    max_value_overlap_list = []
+    max_value_sequential_list = []
     max_value_switch_list = []
 
     for start in range(0, num_rows, agg_samples):
         end = min(start + agg_samples, num_rows)
         # For each row in this window, find the max across GPUs, then find the max in the window
         agg_time_gpus = {
-            gpu: sum(t_total_bursty_dict[gpu][row_idx] for row_idx in range(start, end))
-            for gpu in t_total_bursty_dict
+            gpu: sum(t_total_overlap_dict[gpu][row_idx] for row_idx in range(start, end))
+            for gpu in t_total_overlap_dict
         }
 
         # window_max = max(agg_time_gpus.values())
         max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
-        max_value_bursty_list.append(max_value)
+        max_value_overlap_list.append(max_value)
     
     for start in range(0, num_rows, agg_samples):
         end = min(start + agg_samples, num_rows)
         # For each row in this window, find the max across GPUs, then find the max in the window
         agg_time_gpus = {
-            gpu: sum(t_total_interleaved_dict[gpu][row_idx] for row_idx in range(start, end))
-            for gpu in t_total_interleaved_dict
+            gpu: sum(t_total_sequential_dict[gpu][row_idx] for row_idx in range(start, end))
+            for gpu in t_total_sequential_dict
         }
 
         max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
-        max_value_interleaved_list.append(max_value)
+        max_value_sequential_list.append(max_value)
 
     for start in range(0, num_rows, agg_samples):
         end = min(start + agg_samples, num_rows)
@@ -652,8 +653,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, a
         max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
         max_value_switch_list.append(max_value)
 
-    print(f"Estimate Runtime On Target Hardware [Interleave Mode]: {sum(max_value_interleaved_list):.2f}")
-    print(f"Estimate Runtime On Target Hardware [Bursty Mode]: {sum(max_value_bursty_list):.2f}")
+    print(f"Estimate Runtime On Target Hardware [Overlap Mode]: {sum(max_value_overlap_list):.2f}")
+    print(f"Estimate Runtime On Target Hardware [Sequential Mode]: {sum(max_value_sequential_list):.2f}")
     print(f"Estimate Runtime On Target Hardware [Switch Mode]: {sum(max_value_switch_list):.2f}")
 
 
@@ -700,8 +701,8 @@ def main():
     metrics = args.metrics
     ref_gpu_arch = args.ref_gpu_architect
     target_gpu_arch = args.target_gpu_architect
-    flop_util = args.flop_util # such as 0.3
-    mem_util = args.mem_util # such as 0.33
+    flop_util = args.flop_util
+    mem_util = args.mem_util
     precision = args.precision
 
     profiled_df = process_files(num_gpu, dcgm_input, metrics)
