@@ -348,17 +348,17 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
             end_idx = min(len(t_total_overlap_target_list_finish), int(end_ts / sample_interval_ms))
         
         if start_idx < end_idx:
-            t_total_interleave_target_list_slice = t_total_overlap_target_list_finish[start_idx:end_idx]
-            t_total_bursty_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
+            t_total_overlap_target_list_slice = t_total_overlap_target_list_finish[start_idx:end_idx]
+            t_total_sequential_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
             t_total_switch_target_list_slice = t_total_switch_target_list_finish[start_idx:end_idx]
         else:
-            t_total_interleave_target_list_slice = []
-            t_total_bursty_target_list_slice = []
+            t_total_overlap_target_list_slice = []
+            t_total_sequential_target_list_slice = []
             t_total_switch_target_list_slice = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
-        print(f"Estimate Runtime of Analysis Window On Target Hardware [Overlap Scenario]: {sum(t_total_interleave_target_list_slice):0.2f}")
-        print(f"Estimate Runtime of Analysis Window On Target Hardware [Sequential Scenario]: {sum(t_total_bursty_target_list_slice):0.2f}")
+        print(f"Estimate Runtime of Analysis Window On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_slice):0.2f}")
+        print(f"Estimate Runtime of Analysis Window On Target Hardware [Sequential Scenario]: {sum(t_total_sequential_target_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_slice):0.2f}")
         return 
     
