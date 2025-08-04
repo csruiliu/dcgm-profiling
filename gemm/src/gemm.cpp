@@ -245,8 +245,8 @@ struct CublasTraits;
 template<>
 struct CublasTraits<float> {
   static constexpr auto gemm_func = &cublasSgemm;
-  // static constexpr auto math_mode = CUBLAS_TF32_TENSOR_OP_MATH;
-  static constexpr auto math_mode = CUBLAS_DEFAULT_MATH;
+  static constexpr auto math_mode = CUBLAS_TF32_TENSOR_OP_MATH;
+  // static constexpr auto math_mode = CUBLAS_DEFAULT_MATH;
 };
 
 template<>
