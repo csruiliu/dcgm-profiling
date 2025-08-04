@@ -4,15 +4,17 @@ import numpy as np
 import os
 import argparse
 import sys
+import math
 from collections import defaultdict
+
 
 plt.style.use('default')
 plt.rcParams.update({
     #'font.size': 12,
     #'font.family': 'serif',
     'axes.linewidth': 1.5,
-    'axes.spines.top': False,
-    'axes.spines.right': False,
+    'axes.spines.top': True,
+    'axes.spines.right': True,
     'xtick.direction': 'in',
     'ytick.direction': 'in',
     #'figure.dpi': 300
@@ -129,7 +131,7 @@ def apply_sampling_window(data, window_size, aggregation_method='mean'):
     return aggregated_data, new_time_points
 
 
-def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots', window_size=1, aggregation_method='mean'):
+def create_individual_plots(gpu_data, metrics, output_dir='gpu_plots', window_size=1, aggregation_method='mean'):
     """
     Create individual plots for each GPU-metric combination
     Generate ALL plots regardless of activity level
@@ -252,6 +254,219 @@ def create_gpu_metric_plots(gpu_data, metrics, output_dir='gpu_plots', window_si
     
     return plot_count
 
+
+def create_merged_plots_per_gpu(gpu_data, metrics, output_dir='gpu_plots', window_size=1, aggregation_method='mean', ncols=3):
+    """
+    Create one figure per GPU with all metrics as subplots, with aligned horizontal axes
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get sorted list of GPU IDs and generate colors dynamically
+    gpu_ids = sorted(gpu_data.keys(), key=lambda x: int(x) if x.isdigit() else float('inf'))
+    num_gpus = len(gpu_ids)
+    
+    # Generate colors for metrics (since we're grouping by GPU now)
+    metric_colors = generate_colors(len(metrics))
+    metric_color_map = {metric: metric_colors[i] for i, metric in enumerate(metrics)}
+    
+    # Define metrics that should have 0-1 range displayed as 0%-100%
+    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT'}
+    
+    plots_created = 0
+    
+    for gpu_id in gpu_ids:
+        # Find valid metrics for this GPU
+        valid_metrics = []
+        for metric in metrics:
+            if metric in gpu_data[gpu_id] and len(gpu_data[gpu_id][metric]) > 0:
+                valid_metrics.append(metric)
+        
+        if not valid_metrics:
+            print(f'Warning: No valid metrics found for GPU {gpu_id}')
+            continue
+        
+        # Calculate subplot layout
+        total_subplots = len(valid_metrics)
+        nrows = math.ceil(total_subplots / ncols)
+        
+        # Create the figure with subplots for this GPU
+        fig, axes = plt.subplots(nrows, ncols, figsize=(6*ncols, 3*nrows), sharex=True)
+        
+        # Properly handle all possible axes configurations
+        if nrows == 1 and ncols == 1:
+            # Single subplot
+            axes_flat = [axes]
+        elif nrows == 1:
+            # Single row, multiple columns
+            axes_flat = axes.flatten() if hasattr(axes, 'flatten') else list(axes)
+        elif ncols == 1:
+            # Multiple rows, single column
+            axes_flat = axes.flatten() if hasattr(axes, 'flatten') else list(axes)
+        else:
+            # Multiple rows and columns
+            axes_flat = axes.flatten()
+        
+        # Plot each metric for this GPU
+        for idx, metric in enumerate(valid_metrics):
+            ax = axes[idx]
+            
+            # Apply sampling window
+            original_values = gpu_data[gpu_id][metric]
+            values, time_points = apply_sampling_window(original_values, window_size, aggregation_method)
+            
+            # Get color for this metric
+            color = metric_color_map[metric]
+            
+            # Plot the data
+            ax.plot(time_points, values, color=color, linewidth=2, alpha=0.8, marker='o', markersize=4)
+            
+            # Set labels and formatting
+            if metric in percentage_metrics:
+                ax.set_ylabel(f'{metric} (%)', fontsize=12)
+                
+                # Special handling for GRACT - extend range to 110%
+                if metric == 'GRACT':
+                    ax.set_ylim(0, 1.1)
+                else:
+                    ax.set_ylim(0, 1)
+                
+                # Format y-axis to show as percentage
+                ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x*100)}%'))
+            else:
+                ax.set_ylabel(f'{metric}', fontsize=12)
+            
+            # Set title for each subplot
+            ax.set_title(f'{metric}', fontsize=14, fontweight='bold')
+            
+            # Grid and styling
+            ax.grid(True, alpha=0.3)
+            ax.tick_params(axis='both', which='major', labelsize=10)
+            
+            # Set spine properties
+            for spine in ax.spines.values():
+                spine.set_linewidth(1.5)
+        
+        # Hide unused subplots
+        for idx in range(total_subplots, len(axes)):
+            axes[idx].set_visible(False)
+        
+        # Set common x-axis label only for bottom row
+        for idx in range(total_subplots):
+            row = idx // ncols
+            if row == nrows - 1 or idx >= total_subplots - ncols:  # Bottom row
+                axes[idx].set_xlabel('Time (s)', fontsize=12)
+        
+        # Set overall title for the figure
+        fig.suptitle(f'GPU {gpu_id} - All Metrics', fontsize=18, fontweight='bold', y=0.98)
+        
+        # Adjust layout
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.93)  # Make room for suptitle
+        
+        # Save the plot for this GPU
+        if window_size > 1:
+            filename = f'GPU_{gpu_id}_all_metrics_window{window_size}_{aggregation_method}.png'
+        else:
+            filename = f'GPU_{gpu_id}_all_metrics.png'
+        
+        filepath = os.path.join(output_dir, filename)
+        plt.savefig(filepath, dpi=600, bbox_inches='tight')
+        plt.close()
+        
+        plots_created += 1
+        print(f'Created merged plot for GPU {gpu_id}: {filename} ({len(valid_metrics)} metrics)')
+    
+    print(f'\nTotal GPU plots created: {plots_created}')
+    return plots_created
+
+
+def create_merged_plots_per_metric(gpu_data, metrics, output_dir='gpu_plots', window_size=1, aggregation_method='mean'):
+    """
+    Create one plot per metric showing all GPUs on the same plot
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get sorted list of GPU IDs and generate colors dynamically
+    gpu_ids = sorted(gpu_data.keys(), key=lambda x: int(x) if x.isdigit() else float('inf'))
+    num_gpus = len(gpu_ids)
+    
+    # Generate colors for all GPUs
+    gpu_colors = generate_colors(num_gpus)
+    color_map = {gpu_id: gpu_colors[i] for i, gpu_id in enumerate(gpu_ids)}
+    
+    # Define metrics that should have 0-1 range displayed as 0%-100%
+    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT'}
+    
+    plots_created = 0
+    
+    for metric in metrics:
+        plt.figure(figsize=(12, 6))
+        
+        valid_gpus_for_metric = []
+        
+        # Plot all GPUs for this metric on the same plot
+        for gpu_id in gpu_ids:
+            if metric in gpu_data[gpu_id] and len(gpu_data[gpu_id][metric]) > 0:
+                # Apply sampling window
+                original_values = gpu_data[gpu_id][metric]
+                values, time_points = apply_sampling_window(original_values, window_size, aggregation_method)
+                
+                # Get color for this GPU
+                color = color_map[gpu_id]
+                
+                # Plot the data
+                plt.plot(time_points, values, color=color, linewidth=4, marker='o', markersize=6, alpha=0.8, label=f'GPU {gpu_id}')
+                valid_gpus_for_metric.append(gpu_id)
+        
+        if valid_gpus_for_metric:
+            # Set labels and formatting
+            plt.xlabel('Time (s)', fontsize=26)
+            
+            if metric in percentage_metrics:
+                plt.ylabel(f'{metric} (%)', fontsize=26)
+                
+                # Special handling for GRACT - extend range to 110%
+                if metric == 'GRACT':
+                    plt.ylim(0, 1.1)  # Set range from 0 to 1.1 (0% to 110%)
+                else:
+                    plt.ylim(0, 1)    # Set range from 0 to 1 (0% to 100%)
+                
+                # Format y-axis to show as percentage (0 to 1 becomes 0% to 100%)
+                plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x*100)}%'))
+            else:
+                plt.ylabel(f'{metric}', fontsize=26)
+            
+            # Add legend
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14)
+            plt.grid(True, alpha=0.3)
+            plt.tick_params(axis='both', which='major', labelsize=20)
+            
+            # Set spine properties to match original styling
+            for spine in plt.gca().spines.values():
+                spine.set_linewidth(2)
+            
+            # Save plot
+            if window_size > 1:
+                filename = f'{metric}_all_gpus_window{window_size}_{aggregation_method}.png'
+            else:
+                filename = f'{metric}_all_gpus.png'
+            
+            filepath = os.path.join(output_dir, filename)
+            plt.savefig(filepath, dpi=600, bbox_inches='tight')
+            plt.close()
+            
+            plots_created += 1
+            print(f'Created merged plot for {metric}: {filename} ({len(valid_gpus_for_metric)} GPUs)')
+        else:
+            plt.close()
+            print(f'No valid data found for metric: {metric}')
+    
+    print(f'\nTotal metric plots created: {plots_created}')
+    return plots_created
+
+
 def main():
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(description='Parse DCGM data and generate GPU metric plots')
@@ -262,12 +477,26 @@ def main():
                         help='Output directory for plots (default: gpu_plots)')
     parser.add_argument('-a', '--aggregation', choices=['mean', 'max', 'min', 'median'], 
                         default='mean', help='Aggregation method for sampling window (default: mean)')
+    parser.add_argument('--individual', action='store_true', 
+                        help='Create individual plots for each GPU-metric combination (default behavior)')
+    parser.add_argument('--merged-gpu', action='store_true',
+                        help='Create merged plots per GPU (one figure per GPU with all metrics)')
+    parser.add_argument('--merged-metric', action='store_true',
+                        help='Create merged plots per metric (one plot per metric with all GPUs)')
+    parser.add_argument('--all', action='store_true',
+                        help='Create all types of plots (individual, merged-gpu, and merged-metric)')
+    parser.add_argument('--ncols', type=int, default=1,
+                        help='Number of columns for subplot layout in merged-gpu plots (default: 3)')
     args = parser.parse_args()
     
     # Validate window size
     if args.window < 1:
         print("Error: Window size must be at least 1")
         sys.exit(1)
+
+    # If no specific plot type is requested, default to individual plots
+    if not (args.individual or args.merged_gpu or args.merged_metric or args.all):
+        args.individual = True
 
     try:
         print(f"Parsing DCGM data from: {args.filename}")
@@ -277,6 +506,11 @@ def main():
         print(f"GPUs detected: {sorted(gpu_data.keys())}")
         print(f"Expected total plots: {len(gpu_data)} GPUs × {len(metrics)} metrics = {len(gpu_data) * len(metrics)} plots")
         
+        if args.window > 1:
+            print(f"Using sampling window of {args.window} with {args.aggregation} aggregation")
+        
+        total_plots = 0
+
         # Show data summary
         for gpu_id in sorted(gpu_data.keys(), key=lambda x: int(x) if x.isdigit() else float('inf')):
             print(f"\nGPU {gpu_id}:")
@@ -292,11 +526,46 @@ def main():
                 else:
                     print(f"  {metric}: Missing")
         
-        print(f"\nCreating ALL GPU-metric plots in '{args.output}' directory...")
-        plot_count = create_gpu_metric_plots(gpu_data, metrics, args.output, args.window, args.aggregation)
+
+        # Create individual plots
+        if args.individual or args.all:
+            print(f"\n=== Creating individual plots ===")
+            individual_count = create_individual_plots(gpu_data, metrics, args.output, args.window, args.aggregation)
+            total_plots += individual_count
+            print(f"Created {individual_count} individual plots")
         
-        print(f"\nCompleted! All {plot_count} plots saved to '{args.output}' directory!")
+        # Create merged plots per GPU
+        if args.merged_gpu or args.all:
+            print(f"\n=== Creating merged plots per GPU ===")
+            gpu_merged_count = create_merged_plots_per_gpu(gpu_data, metrics, args.output, args.window, args.aggregation, args.ncols)
+            total_plots += gpu_merged_count
         
+        # Create merged plots per metric
+        if args.merged_metric or args.all:
+            print(f"\n=== Creating merged plots per metric ===")
+            metric_merged_count = create_merged_plots_per_metric(gpu_data, metrics, args.output, args.window, args.aggregation)
+            total_plots += metric_merged_count
+
+
+        # print(f"\nCreating ALL GPU-metric plots in '{args.output}' directory...")
+        # plot_count = create_gpu_metric_plots(gpu_data, metrics, args.output, args.window, args.aggregation)
+        
+        # print(f"\nCompleted! All {plot_count} plots saved to '{args.output}' directory!")
+        
+        print(f"\n=== Summary ===")
+        print(f"Total plots created: {total_plots}")
+        print(f"Output directory: {args.output}")
+
+        # List all created files
+        print(f"\nGenerated files in {args.output}/:")
+        try:
+            files = sorted(os.listdir(args.output))
+            for filename in files:
+                if filename.endswith('.png'):
+                    print(f"  {filename}")
+        except OSError:
+            print("  Could not list files in output directory")
+        '''
         # List all created files
         print(f"\nGenerated files:")
         gpu_ids = sorted(gpu_data.keys(), key=lambda x: int(x) if x.isdigit() else float('inf'))
@@ -307,7 +576,7 @@ def main():
                 else:
                     filename = f'GPU_{gpu_id}_{metric}.png'
                 print(f"  {filename}")
-        
+        '''
     except FileNotFoundError as e:
         print(f"Error: {e}")
         sys.exit(1)
