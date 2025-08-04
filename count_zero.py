@@ -91,8 +91,8 @@ def count_zero(profiled_df, metrics):
         if metric_values[metrics.index('GRACT')] > 0.9:
             total_samples += 1
 
-        if metric_values[metrics.index('TENSO')] < 0.01 and metric_values[metrics.index('GRACT')] > 0.9:
-            zero_samples += 1
+            if metric_values[metrics.index('TENSO')] < 0.01:
+                zero_samples += 1
 
     print(f"Total Samples: {total_samples}, Zero Samples: {zero_samples}")    
     
