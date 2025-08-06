@@ -150,8 +150,10 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
         metric_values = list(getattr(row, metric) for metric in metrics)
         
-        t_flop = sample_intv * (metric_values[metrics.index('TENSO')] + metric_values[metrics.index('FP64A')] + 
-                               metric_values[metrics.index('FP32A')] + metric_values[metrics.index('FP16A')])  
+        t_flop = sample_intv * (metric_values[metrics.index('TENSO')] + 
+                                metric_values[metrics.index('FP64A')] + 
+                                metric_values[metrics.index('FP32A')] + 
+                                metric_values[metrics.index('FP16A')])  
         t_flop_list.append(t_flop)
         
         t_dram = sample_intv * metric_values[metrics.index('DRAMA')]
@@ -207,15 +209,15 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         
         flop = np.mean(t_flop_list_slice) / sample_intv * ref_gpu_spec[prec_ref_mappings[precision]]
         dram = np.mean(t_dram_list_slice) / sample_intv * ref_gpu_spec["ref_mem_bw"]
-        print(f"Estimate TFLOPS: {flop:0.2f}")
-        print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
+        print(f"Estimate TFLOPS on Reference Hardware: {flop:0.2f}")
+        print(f"Estimate GPU Memory Bandwidth on Reference Hardware: {dram:0.2f}")
         print(f"Estimate Runtime of Analysis Window On Reference Hardware: {sum(t_total_list_slice):0.2f}")
         return 
 
     flop = np.mean(t_flop_list_finish) / sample_intv * ref_gpu_spec[prec_ref_mappings[precision]]
     dram = np.mean(t_dram_list_finish) / sample_intv * ref_gpu_spec["ref_mem_bw"]
-    print(f"Estimate TFLOPS: {flop:0.2f}")
-    print(f"Estimate GPU Memory Bandwidth: {dram:0.2f}")
+    print(f"Estimate TFLOPS on Reference Hardware: {flop:0.2f}")
+    print(f"Estimate GPU Memory Bandwidth on Reference Hardware: {dram:0.2f}")
     print(f"Estimate Overall Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
     return
 
@@ -257,7 +259,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
     fp64a_ref_list = list()
     fp32a_ref_list = list()
     fp16a_ref_list = list()
-
+    
     for row in gpu_dfs.itertuples(index=False, name='MetricRow'):
         # row is a namedtuple, you can access columns via row.<colname>
         # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
@@ -283,8 +285,12 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
         drama_ref_list.append(metric_values[metrics.index('DRAMA')])
 
         t_roofline_ref = max(t_flop_ref, t_dram_ref)
-        
+
+        t_roofline_ref_sequential = t_flop_ref + t_dram_ref
+
         t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
+
+        t_otherGPU_ref_sequential = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref_sequential)
 
         t_pcie_ref = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_pcie_bw"]) 
 
@@ -292,14 +298,13 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
 
         t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
 
-        t_flop_target = (sample_intv * metric_values[metrics.index('TENSO')] * (ref_gpu_spec[prec_ref_mappings[precision]] / target_gpu_spec[prec_target_mappings[precision]]) +
-                         sample_intv * metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                         sample_intv * metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                         sample_intv * metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
+        t_flop_target = sample_intv * (metric_values[metrics.index('TENSO')] * (ref_gpu_spec[prec_ref_mappings[precision]] / target_gpu_spec[prec_target_mappings[precision]]) +
+                                       metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
+                                       metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
+                                       metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
         
         t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
 
-        
         t_roofline_target_overlap = max(t_flop_target, t_dram_target)
 
         t_total_roofline_target_list.append(t_roofline_target_overlap)
@@ -324,6 +329,8 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
         t_roofline_target_switch = max(t_flop_target, t_dram_target)
 
         t_otherGPU_target = t_otherGPU_ref
+
+        t_otherGPU_target_sequential = t_otherGPU_ref_sequential
         
         t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
 
@@ -333,7 +340,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
 
         t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target_sequential + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_target_switch = t_roofline_target_switch + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
 
@@ -404,14 +411,14 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
                      np.mean(fp32a_ref_list_slice) * target_gpu_spec["target_fp32"] +
                      np.mean(fp16a_ref_list_slice) * target_gpu_spec["target_fp16"])
         
-        print(f"Estimate FLOPS On Target Hardware: {est_flops:0.2f}")
+        print(f"Estimate FLOPS On Target Hardware ssss: {est_flops:0.2f}")
         print(f"Estimate Memory BandWidth On Target Hardware: {est_mem_bw:0.2f}")
         print(f"Estimate Roofline Time On Target Hardware: {sum(t_total_roofline_target_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Target Hardware [Sequential Scenario]: {sum(t_total_sequential_target_list_slice):0.2f}")
-        print(f"Estimate Runtime of Analysis Window On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_slice):0.2f}")
+        #print(f"Estimate Runtime of Analysis Window On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_slice):0.2f}")
         return 
-      
+    
     est_mem_bw = np.mean(drama_ref_list_finish) * target_gpu_spec["target_mem_bw"]
     est_flops = (np.mean(tensor_ref_list_finish) * target_gpu_spec[prec_target_mappings[precision]] +
                  np.mean(fp64a_ref_list_finish) * target_gpu_spec["target_fp64"] + 
@@ -422,7 +429,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
     print(f"Estimate Roofline Time On Target Hardware: {sum(t_total_roofline_target_list_finish):0.2f}")
     print(f"Estimate Runtime On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_finish):0.2f}")
     print(f"Estimate Runtime On Target Hardware [Sequential Scenario]: {sum(t_total_sequential_target_list_finish):0.2f}")
-    print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_finish):0.2f}")
+    #print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_finish):0.2f}")
 
 
 def main():
@@ -448,9 +455,9 @@ def main():
                         help='List of metrics, basically the not-none col names')
     parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['double', 'single', 'half'],
                         help='Specify the precision type: double (FP64), single (FP32), half (FP16), or tensor (Tensor ops). Default: single')
-    parser.add_argument('-fu', '--flop_util', action='store', type=float, required=True,
+    parser.add_argument('-fu', '--flop_util', action='store', type=float, default=1.0,
                         help='indicate the estimated flops utlization when bound swtich')
-    parser.add_argument('-mu', '--mem_util', action='store', type=float, required=True,
+    parser.add_argument('-mu', '--mem_util', action='store', type=float, default=1.0,
                         help='indicate the estimated memory utlization when bound swtich')
     args = parser.parse_args()
 
