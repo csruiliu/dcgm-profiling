@@ -612,7 +612,7 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
                      np.mean(fp64a_ref_list_slice) * target_gpu_spec["target_fp64"] + 
                      np.mean(fp32a_ref_list_slice) * target_gpu_spec["target_fp32"] +
                      np.mean(fp16a_ref_list_slice) * target_gpu_spec["target_fp16"])
-        print(f"Estimate FLOPS On Target Hardware ssss: {est_flops:0.2f}")
+        print(f"Estimate FLOPS On Target Hardware: {est_flops:0.2f}")
         print(f"Estimate Memory BandWidth On Target Hardware: {est_mem_bw:0.2f}")
         return t_total_overlap_target_list_slice, t_total_sequential_target_list_slice, t_total_switch_target_list_slice
     

@@ -411,7 +411,7 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
                      np.mean(fp32a_ref_list_slice) * target_gpu_spec["target_fp32"] +
                      np.mean(fp16a_ref_list_slice) * target_gpu_spec["target_fp16"])
         
-        print(f"Estimate FLOPS On Target Hardware ssss: {est_flops:0.2f}")
+        print(f"Estimate FLOPS On Target Hardware: {est_flops:0.2f}")
         print(f"Estimate Memory BandWidth On Target Hardware: {est_mem_bw:0.2f}")
         print(f"Estimate Roofline Time On Target Hardware: {sum(t_total_roofline_target_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_slice):0.2f}")
