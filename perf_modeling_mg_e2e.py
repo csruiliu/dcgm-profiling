@@ -7,6 +7,46 @@ import re
 from collections import Counter
 
 
+# Mapping from metric names to GPU spec keys
+metric_to_spec = {
+    'TENSO': 'ref_fp64_tensor',
+    'FP64A': 'ref_fp64',
+    'FP32A': 'ref_fp32',
+    'FP16A': 'ref_fp16'
+}
+
+prec_ref_mappings = {
+    'double': 'ref_fp64_tensor',
+    'single': 'ref_tf32_tensor',
+    'half': 'ref_fp16_tensor'
+}
+
+prec_target_mappings = {
+    'double': 'target_fp64_tensor',
+    'single': 'target_tf32_tensor',
+    'half': 'target_fp16_tensor'
+}
+
+# I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
+GPU_SPECS = {
+    "A100-40": {
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
+        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
+    },
+    "A100-80": {
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
+        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
+    },
+    "A40": {
+        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
+        "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
+    },
+    "H100": {  # H100 SXM (default)
+        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 494.7,
+        "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
+    }
+}
+
 # Define a custom argument type for a list of strings
 def list_of_strings(arg):
     return arg.split(',')
@@ -421,6 +461,12 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
     t_total_sequential_target_list = list()
     t_total_switch_target_list = list()
 
+    drama_ref_list = list()
+    tensor_ref_list = list()
+    fp64a_ref_list = list()
+    fp32a_ref_list = list()
+    fp16a_ref_list = list()
+
     sample_intv = sample_interval_ms / 1000
 
     for row in df.itertuples(index=False, name='MetricRow'):
@@ -434,33 +480,18 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
         max_metric_name = max(flop_metrics, key=lambda x: metric_values[metrics.index(x)])
         max_flop_value = metric_values[metrics.index(max_metric_name)]
 
-        # Mapping from metric names to GPU spec keys
-        metric_to_spec = {
-            'TENSO': 'ref_fp64_tensor',
-            'FP64A': 'ref_fp64',
-            'FP32A': 'ref_fp32',
-            'FP16A': 'ref_fp16'
-        }
-
-        prec_ref_mappings = {
-            'double': 'ref_fp64_tensor',
-            'single': 'ref_tf32_tensor',
-            'half': 'ref_fp16_tensor'
-        }
-
-        prec_target_mappings = {
-            'double': 'target_fp64_tensor',
-            'single': 'target_tf32_tensor',
-            'half': 'target_fp16_tensor'
-        }
-
         t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
                                     metric_values[metrics.index('FP64A')] + 
                                     metric_values[metrics.index('FP32A')] + 
                                     metric_values[metrics.index('FP16A')])  
-        
+        tensor_ref_list.append(metric_values[metrics.index('TENSO')])
+        fp64a_ref_list.append(metric_values[metrics.index('FP64A')])
+        fp32a_ref_list.append(metric_values[metrics.index('FP32A')])
+        fp16a_ref_list.append(metric_values[metrics.index('FP16A')])
+
         t_dram_ref = sample_intv * metric_values[metrics.index('DRAMA')]
-        
+        drama_ref_list.append(metric_values[metrics.index('DRAMA')])
+
         t_roofline_ref = max(t_flop_ref, t_dram_ref)
         
         t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
@@ -522,10 +553,20 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
         t_total_overlap_target_list_finish = t_total_overlap_target_list[:finish_idx]
         t_total_sequential_target_list_finish = t_total_sequential_target_list[:finish_idx]
         t_total_switch_target_list_finish = t_total_switch_target_list[:finish_idx]
+        drama_ref_list_finish = drama_ref_list[:finish_idx]
+        tensor_ref_list_finish = tensor_ref_list[:finish_idx]
+        fp64a_ref_list_finish = fp64a_ref_list[:finish_idx]
+        fp32a_ref_list_finish = fp32a_ref_list[:finish_idx]
+        fp16a_ref_list_finish = fp16a_ref_list[:finish_idx]
     else:
         t_total_overlap_target_list_finish = t_total_overlap_target_list
         t_total_sequential_target_list_finish = t_total_sequential_target_list
         t_total_switch_target_list_finish = t_total_switch_target_list
+        drama_ref_list_finish = drama_ref_list
+        tensor_ref_list_finish = tensor_ref_list
+        fp64a_ref_list_finish = fp64a_ref_list
+        fp32a_ref_list_finish = fp32a_ref_list   
+        fp16a_ref_list_finish = fp16a_ref_list
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
@@ -541,39 +582,29 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
             t_total_overlap_target_list_slice = t_total_overlap_target_list_finish[start_idx:end_idx]
             t_total_sequential_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
             t_total_switch_target_list_slice = t_total_switch_target_list_finish[start_idx:end_idx]
+            drama_ref_list_slice = drama_ref_list_finish[start_idx:end_idx]
+            tensor_ref_list_slice = tensor_ref_list_finish[start_idx:end_idx]
+            fp64a_ref_list_slice = fp64a_ref_list_finish[start_idx:end_idx]
+            fp32a_ref_list_slice = fp32a_ref_list_finish[start_idx:end_idx]
+            fp16a_ref_list_slice = fp16a_ref_list_finish[start_idx:end_idx]
         else:
             t_total_overlap_target_list_slice = []
             t_total_sequential_target_list_slice = []
             t_total_switch_target_list_slice = []
+            drama_ref_list_slice = []
+            tensor_ref_list_slice = []
+            fp64a_ref_list_slice = []
+            fp32a_ref_list_slice = []
+            fp16a_ref_list_slice = []
             raise ValueError("End Timestamp is earlier than Start Timestamp")
 
         return t_total_overlap_target_list_slice, t_total_sequential_target_list_slice, t_total_switch_target_list_slice
-
+    
     return t_total_overlap_target_list_finish, t_total_sequential_target_list_finish, t_total_switch_target_list_finish
 
 
 def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util, mem_util):
     finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
-
-    # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
-    GPU_SPECS = {
-        "A100-40": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
-            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
-        },
-        "A100-80": {
-            "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
-            "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
-        },
-        "A40": {
-            "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
-            "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
-        },
-        "H100": {  # H100 SXM (default)
-            "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 494.7,
-            "fp16": 133.8, "fp16_tensor": 989.4, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
-        }
-    }
 
     def get_gpu_specs(gpu_arch, prefix):
         """Get GPU specifications with appropriate prefix."""
