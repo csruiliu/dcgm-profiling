@@ -324,13 +324,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
 
         t_roofline_target_switch = max(t_flop_target, t_dram_target)
 
-        t_otherGPU_target_overlap = t_otherGPU_ref_overlap * ((ref_gpu_spec["ref_base_clock"] + ref_gpu_spec["ref_boost_clock"]) / (target_gpu_spec["target_base_clock"] + target_gpu_spec["target_boost_clock"]) 
-                                                              * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"]))
-        #t_otherGPU_target_sequential = t_otherGPU_ref_sequential
-        t_otherGPU_target_sequential = t_otherGPU_ref_sequential * ((ref_gpu_spec["ref_base_clock"] + ref_gpu_spec["ref_boost_clock"]) / (target_gpu_spec["target_base_clock"] + target_gpu_spec["target_boost_clock"]) 
-                                                                    * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"]))
+        t_otherGPU_target_overlap = t_otherGPU_ref_overlap * (ref_gpu_spec["ref_base_clock"] / target_gpu_spec["target_base_clock"])  * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"])
 
-        
+        t_otherGPU_target_sequential = t_otherGPU_ref_sequential * (ref_gpu_spec["ref_base_clock"] / target_gpu_spec["target_base_clock"])  * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"])
+
         t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
 
         t_nvlink_target = t_nvlink_ref * (ref_gpu_spec["ref_nvlink_bw"] / target_gpu_spec["target_nvlink_bw"])
