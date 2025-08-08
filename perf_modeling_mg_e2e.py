@@ -30,20 +30,20 @@ prec_target_mappings = {
 # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
 GPU_SPECS = {
     "A100-40": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
-        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
+        "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
     },
     "A100-80": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156,
-        "fp16": 78, "fp16_tensor": 312, "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
+        "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
     },
     "A40": {
-        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8,
-        "fp16": 37.4, "fp16_tensor": 149.7, "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5
+        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8, "fp16": 37.4, "fp16_tensor": 149.7, 
+        "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, "base_clock": 1305, "boost_clock": 1740, "num_streams": 84
     },
     "H100": {  # H100 SXM (default)
-        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989,
-        "fp16": 133.8, "fp16_tensor": 1979, "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900
+        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
+        "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, "base_clock": 1590, "boost_clock": 1980, "num_streams": 144
     }
 }
 
@@ -494,11 +494,11 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
         t_dram_ref = sample_intv * metric_values[metrics.index('DRAMA')]
         drama_ref_list.append(metric_values[metrics.index('DRAMA')])
 
-        t_roofline_ref = max(t_flop_ref, t_dram_ref)
+        t_roofline_ref_overlap = max(t_flop_ref, t_dram_ref)
         
         t_roofline_ref_sequential = t_flop_ref + t_dram_ref
 
-        t_otherGPU_ref = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref)
+        t_otherGPU_ref_overlap = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref_overlap)
 
         t_otherGPU_ref_sequential = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref_sequential)
         
@@ -513,11 +513,11 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
                                        metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
                                        metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
         t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
-        
+
         t_roofline_target_overlap = max(t_flop_target, t_dram_target)
-
+        
         t_roofline_target_sequential = t_flop_target + t_dram_target
-
+        
         bound_ref, bound_target = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target)
 
         if bound_ref == bound_target:
@@ -534,10 +534,12 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
             raise ValueError("Impossible Error")
         
         t_roofline_target_switch = max(t_flop_target, t_dram_target)
-
-        t_otherGPU_target = t_otherGPU_ref
-
-        t_otherGPU_target_sequential = t_otherGPU_ref_sequential
+        #t_otherGPU_target_overlap = t_otherGPU_ref_overlap
+        t_otherGPU_target_overlap = t_otherGPU_ref_overlap * ((ref_gpu_spec["ref_base_clock"] + ref_gpu_spec["ref_boost_clock"]) / (target_gpu_spec["target_base_clock"] + target_gpu_spec["target_boost_clock"]) 
+                                                              * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"]))
+        #t_otherGPU_target_sequential = t_otherGPU_ref_sequential
+        t_otherGPU_target_sequential = t_otherGPU_ref_sequential * ((ref_gpu_spec["ref_base_clock"] + ref_gpu_spec["ref_boost_clock"]) / (target_gpu_spec["target_base_clock"] + target_gpu_spec["target_boost_clock"]) 
+                                                                    * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"]))
 
         t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
         
@@ -545,11 +547,11 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
         
         t_otherNode_target = t_otherNode_ref
 
-        t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target_overlap + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target_sequential + t_pcie_target + t_nvlink_target + t_otherNode_target
 
-        t_total_target_switch = t_roofline_target_switch + t_otherGPU_target + t_pcie_target + t_nvlink_target + t_otherNode_target
+        t_total_target_switch = t_roofline_target_switch + t_otherGPU_target_overlap + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_overlap_target_list.append(t_total_target_overlap) 
 
