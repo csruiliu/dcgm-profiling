@@ -47,6 +47,18 @@ GPU_SPECS = {
     }
 }
 
+HOST_SPECS = {
+    "Perlmutter": {
+        "cores": 64, "threads": 128, "base_clock": 2.45, "boost_clock": 3.5, "mem_bw": 3200
+    },
+    "Einsteinium": {
+        "cores": 56, "threads": 112, "base_clock": 2.0, "boost_clock": 3.8, "mem_bw": 4800
+    },
+    "Eos": {
+        "cores": 56, "threads": 112, "base_clock": 2.0, "boost_clock": 3.8, "mem_bw": 4800
+    }
+}
+
 # Define a custom argument type for a list of strings
 def list_of_strings(arg):
     return arg.split(',')
