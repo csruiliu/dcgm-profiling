@@ -21,6 +21,14 @@ GPU_SPECS = {
     "H100": {  # H100 SXM (default)
         "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
         "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, "base_clock": 1590, "boost_clock": 1980, "num_streams": 132
+    },
+    "HYP-M-IO-A": {
+        "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "tf32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
+        "mem_bw": 1555*8.0, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
+    },
+    "HYP-F-IO-A": {
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "tf32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "mem_bw": 1555*1.5, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     }
 }
 
