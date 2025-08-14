@@ -3,11 +3,8 @@ import numpy as np
 import os
 from pathlib import Path
 import argparse
-import re
 import json
-from collections import Counter
 import glob
-from dataclasses import dataclass,asdict,field
 import matplotlib.pyplot as plt
 
 
@@ -86,6 +83,18 @@ def get_runtime_job(metadata):
     for entry in metadata['entries']:
         runtime += entry['end_ts'] - entry['start_ts']
     return runtime // 1000
+
+
+# Define a custom argument type for a list of strings
+def list_of_strings(arg):
+    return arg.split(',')
+
+def is_number(value):
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
 
 
 def preprocess_df(df):
@@ -328,13 +337,24 @@ def main():
     ###################################
     # get all parameters
     ###################################
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('-s', '--sample_interval_second', action='store', type=int, required=True,
+                        help='indicate the sample interval in milliseconds')
+    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
+                        choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
+    parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
+                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 
+                                 'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14', 'GPU-M-IO-A-H22', 'GPU-F-IO-A-H22', 'GPU-M-IO-A-H24', 'GPU-F-IO-A-H24'], 
+                        help='indicate the target gpu architecture')
+    parser.add_argument('--job_paths', type=list_of_strings, required=True, help='List of job_paths')
     
-    ref_gpu_arch = "A100-40"
-    tgt_gpu_arch = "H100"
-    #tgt_gpu_arch = ["Hopper", "Rubin", "Rubin_Uni"]
-    sampling_intv = 10.0  # seconds
+    
+    args = parser.parse_args()
 
-    jobwise_data_paths = ["/home/ruiliu/Develop/dcgm-profiling/pm-jobs/05_16_2025"]
+    sampling_intv = args.overall_runtime_second
+    ref_gpu_arch = args.ref_gpu_architect
+    tgt_gpu_arch = args.target_gpu_architect
+    jobwise_data_paths = args.job_paths
     
     summaries=dict()
     
