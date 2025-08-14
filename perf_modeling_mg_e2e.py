@@ -8,14 +8,14 @@ from collections import Counter
 
 
 # Mapping from metric names to GPU spec keys
-metric_to_spec_ref = {
+metric_ref_mappings = {
     'TENSO': 'ref_fp64_tensor',
     'FP64A': 'ref_fp64',
     'FP32A': 'ref_fp32',
     'FP16A': 'ref_fp16'
 }
 
-metric_to_spec_target = {
+metric_target_mappings = {
     'TENSO': 'target_fp64_tensor',
     'FP64A': 'target_fp64',
     'FP32A': 'target_fp32',
@@ -52,13 +52,37 @@ GPU_SPECS = {
         "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
         "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, "base_clock": 1590, "boost_clock": 1980, "num_streams": 132
     },
-    "HYP-M-IO-A": {
+    "R100": {
         "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "tf32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
         "mem_bw": 1555*8.0, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
-    "HYP-F-IO-A": {
+    "R100-UNI": {
         "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "tf32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
         "mem_bw": 1555*1.5, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
+    },
+    "GPU-M-IO-A-H14": {
+        "fp64": 9.7*1.0, "fp64_tensor": 19.5*1.0, "fp32": 19.5*1.0, "tf32_tensor": 156*1.0, "fp16": 78*1.0, "fp16_tensor": 312*1.0, 
+        "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 1.0, "alpha_cpu": 3.0,
+    },
+    "GPU-F-IO-A-H14": {
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "tf32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "mem_bw": 1555*1.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
+    },
+    "GPU-M-IO-A-H22": {
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
+    },
+    "GPU-F-IO-A-H22": {
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
+    },
+    "GPU-M-IO-A-H24": {
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
+    },
+    "GPU-F-IO-A-H24": {
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "tf32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     }
 }
 
@@ -556,7 +580,7 @@ def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, 
         elif bound_ref != bound_target and bound_target == "compute":
             print("memory-bound switch to compute-bound")
             # t_flop_target = t_flop_target * flop_util_bound_switch
-            t_flop_target = sample_intv * flop_util_bound_switch * (ref_gpu_spec[metric_to_spec_ref[max_metric_name]] / target_gpu_spec[metric_to_spec_target[max_metric_name]])
+            t_flop_target = sample_intv * flop_util_bound_switch * (ref_gpu_spec[metric_ref_mappings[max_metric_name]] / target_gpu_spec[metric_target_mappings[max_metric_name]])
         else:
             raise ValueError("Impossible Error")
         
@@ -760,7 +784,8 @@ def main():
     parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
                         choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
     parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
-                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'HYP-M-IO-A', 'HYP-F-IO-A'], help='indicate the target gpu architecture')
+                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14'], 
+                        help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
     parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['double', 'single', 'half'],
