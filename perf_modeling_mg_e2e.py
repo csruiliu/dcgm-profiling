@@ -784,7 +784,8 @@ def main():
     parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
                         choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
     parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
-                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14'], 
+                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 
+                                 'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14', 'GPU-M-IO-A-H22', 'GPU-F-IO-A-H22', 'GPU-M-IO-A-H24', 'GPU-F-IO-A-H24'], 
                         help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
