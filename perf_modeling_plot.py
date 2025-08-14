@@ -150,7 +150,7 @@ def create_individual_plots(gpu_data, metrics, output_dir='gpu_plots', window_si
     color_map = {gpu_id: gpu_colors[i] for i, gpu_id in enumerate(gpu_ids)}
     
     # Define metrics that should have 0-1 range displayed as 0%-100%
-    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT'}
+    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT', 'TENSO'}
     
     plot_count = 0
     
@@ -271,7 +271,7 @@ def create_merged_plots_per_gpu(gpu_data, metrics, output_dir='gpu_plots', windo
     metric_color_map = {metric: metric_colors[i] for i, metric in enumerate(metrics)}
     
     # Define metrics that should have 0-1 range displayed as 0%-100%
-    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT'}
+    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT', 'TENSO'}
     
     plots_created = 0
     
@@ -397,7 +397,7 @@ def create_merged_plots_per_metric(gpu_data, metrics, output_dir='gpu_plots', wi
     color_map = {gpu_id: gpu_colors[i] for i, gpu_id in enumerate(gpu_ids)}
     
     # Define metrics that should have 0-1 range displayed as 0%-100%
-    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT'}
+    percentage_metrics = {'DRAMA', 'FP16A', 'FP32A', 'FP64A', 'GRACT', 'TENSO'}
     
     plots_created = 0
     
