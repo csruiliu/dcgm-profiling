@@ -5,6 +5,7 @@
 **/*.zip
 **/results
 **/figures
+./pm-jobs
 
 # Prerequisites
 *.d
