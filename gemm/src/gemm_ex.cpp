@@ -12,7 +12,6 @@
 #include <string>
 #include <type_traits>
 
-
 // C++11 compatible Timer class using RAII
 class Timer {
   public:
@@ -40,7 +39,7 @@ class Timer {
         }
     }
 
-    static void print_results(int N, int repeats, double alpha, double beta) {
+    static void print_results(size_t N, int repeats, double alpha, double beta) {
         std::cout << "\n=== Timing Results ===" << std::endl;
 
         double total = 0;
@@ -268,7 +267,7 @@ template <> struct CublasTraits<__half> {
 
 template <typename T> class Gemm {
   private:
-    int N_;
+    size_t N_;
 
     // Matrices on Host
     T *h_matrixA;
@@ -283,7 +282,7 @@ template <typename T> class Gemm {
     cublasHandle_t cublas_handle_;
 
   public:
-    Gemm(int N) : N_(N) {
+    Gemm(size_t N) : N_(N) {
     }
 
     ~Gemm() {
@@ -447,7 +446,7 @@ template <typename T> class Gemm {
 } // namespace gemm
 
 // Template function to eliminate code duplication
-template <typename T> bool run_gemm(int N, int repeats, T alpha, T beta, const std::string &precision_name) {
+template <typename T> bool run_gemm(size_t N, int repeats, T alpha, T beta, const std::string &precision_name) {
     TIME_SCOPE("Total Execution");
 
     gemm::Gemm<T> gemm(N);
@@ -469,7 +468,7 @@ int main(int argc, char *argv[]) {
     }
 
     int gpu_id = std::atoi(argv[1]);
-    int N = std::atoi(argv[2]);
+    size_t N = std::atoi(argv[2]);
     int repeats = std::atoi(argv[3]);
     double alpha = std::atof(argv[4]);
     double beta = std::atof(argv[5]);

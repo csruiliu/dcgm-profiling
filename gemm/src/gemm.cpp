@@ -40,7 +40,7 @@ class Timer {
         }
     }
 
-    static void print_results(int N, int repeats, double alpha, double beta) {
+    static void print_results(size_t N, int repeats, double alpha, double beta) {
         std::cout << "\n=== Timing Results ===" << std::endl;
 
         double total = 0;
@@ -261,7 +261,7 @@ template <> struct CublasTraits<__half> {
 
 template <typename T> class Gemm {
   private:
-    int N_;
+    size_t N_;
 
     // Matrices on Host
     T *h_matrixA;
@@ -276,11 +276,15 @@ template <typename T> class Gemm {
     cublasHandle_t cublas_handle_;
 
   public:
-    Gemm(int N) : N_(N) {
+    Gemm(size_t N) : N_(N) {
     }
 
     ~Gemm() {
         cleanup();
+    }
+
+    size_t get_matrix_size() const {
+        return sizeof(T) * N_ * N_;
     }
 
     bool compute_gemm_warmup(int repeats, T alpha = T(1.0), T beta = T(0.0)) {
@@ -312,7 +316,7 @@ template <typename T> class Gemm {
     bool gather_results() {
         TIME_SCOPE("Copy data from GPU to Host");
         std::cout << "Gather Results: Copy data from GPU to Host" << std::endl;
-        cudaError_t err = cudaMemcpy(h_matrixC, d_matrixC, sizeof(T) * N_ * N_, cudaMemcpyDeviceToHost);
+        cudaError_t err = cudaMemcpy(h_matrixC, d_matrixC, get_matrix_size(), cudaMemcpyDeviceToHost);
         handle_cuda_error(err, "cudaMemcpy C host to device");
 
         cudaDeviceSynchronize();
@@ -324,13 +328,13 @@ template <typename T> class Gemm {
         std::cout << "Allocating Matrices on Host" << std::endl;
 
         // Use regular malloc instead of pinned memory
-        h_matrixA = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
+        h_matrixA = static_cast<T *>(malloc(get_matrix_size()));
         if (!h_matrixA) {
             std::cerr << "malloc h_matrixA failed" << std::endl;
             return false;
         }
 
-        h_matrixB = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
+        h_matrixB = static_cast<T *>(malloc(get_matrix_size()));
         if (!h_matrixB) {
             std::cerr << "malloc h_matrixB failed" << std::endl;
             free(h_matrixA);
@@ -338,7 +342,7 @@ template <typename T> class Gemm {
             return false;
         }
 
-        h_matrixC = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
+        h_matrixC = static_cast<T *>(malloc(get_matrix_size()));
         if (!h_matrixC) {
             std::cerr << "malloc h_matrixC failed" << std::endl;
             free(h_matrixA);
@@ -352,7 +356,7 @@ template <typename T> class Gemm {
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
 
-        for (long i = 0; i < N_ * N_; ++i) {
+        for (long long i = 0; i < N_ * N_; ++i) {
             h_matrixA[i] = static_cast<T>(dis(gen));
             h_matrixB[i] = static_cast<T>(dis(gen));
             h_matrixC[i] = static_cast<T>(dis(gen));
@@ -363,14 +367,14 @@ template <typename T> class Gemm {
         TIME_SCOPE("Matrices Allocation on GPU");
         std::cout << "Allocating Matrics on GPU" << std::endl;
 
-        // Allocate matrices on host
-        cudaError_t err = cudaMalloc(&d_matrixA, sizeof(T) * N_ * N_);
+        // Allocate matrices on device
+        cudaError_t err = cudaMalloc(&d_matrixA, get_matrix_size());
         handle_cuda_error(err, "cudaMalloc d_matrixA");
 
-        err = cudaMalloc(&d_matrixB, sizeof(T) * N_ * N_);
+        err = cudaMalloc(&d_matrixB, get_matrix_size());
         handle_cuda_error(err, "cudaMalloc d_matrixB");
 
-        err = cudaMalloc(&d_matrixC, sizeof(T) * N_ * N_);
+        err = cudaMalloc(&d_matrixC, get_matrix_size());
         handle_cuda_error(err, "cudaMalloc d_matrixC");
 
         cudaDeviceSynchronize();
@@ -382,13 +386,13 @@ template <typename T> class Gemm {
         std::cout << "Copy Data from Host to GPU" << std::endl;
 
         // Copy from host to device
-        cudaError_t err = cudaMemcpy(d_matrixA, h_matrixA, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        cudaError_t err = cudaMemcpy(d_matrixA, h_matrixA, get_matrix_size(), cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy A host to device");
-
-        err = cudaMemcpy(d_matrixB, h_matrixB, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        
+        err = cudaMemcpy(d_matrixB, h_matrixB, get_matrix_size(), cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy B host to device");
 
-        err = cudaMemcpy(d_matrixC, h_matrixC, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        err = cudaMemcpy(d_matrixC, h_matrixC, get_matrix_size(), cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy C host to device");
 
         cudaDeviceSynchronize();
@@ -438,7 +442,7 @@ template <typename T> class Gemm {
 } // namespace gemm
 
 // Template function to eliminate code duplication
-template <typename T> bool run_gemm(int N, int repeats, T alpha, T beta, const std::string &precision_name) {
+template <typename T> bool run_gemm(size_t N, int repeats, T alpha, T beta, const std::string &precision_name) {
     TIME_SCOPE("Total Execution");
 
     gemm::Gemm<T> gemm(N);
@@ -460,7 +464,7 @@ int main(int argc, char *argv[]) {
     }
 
     int gpu_id = std::atoi(argv[1]);
-    int N = std::atoi(argv[2]);
+    size_t N = std::atoi(argv[2]);
     int repeats = std::atoi(argv[3]);
     double alpha = std::atof(argv[4]);
     double beta = std::atof(argv[5]);
