@@ -1,8 +1,7 @@
 NVCC = nvcc
 CC = CC
-CFLAGS = --std c++14 -O3 -DUSE_CUBLAS -I$(CUDA_HOME)/include
+CFLAGS = --std c++14 -O3 -I$(CUDA_HOME)/include
 LIBS = -L/opt/nvidia/hpc_sdk/Linux_x86_64/23.9/math_libs/lib64 -lcublas
-CFLAGS += -DUSE_MPI
 
 all: gemm.x gemm_lt.x gemm_mpi.x gemm_bursty.x gemm_bursty_stream.x gemm_interleave_sync.x gemm_interleave_async.x
 
@@ -11,6 +10,9 @@ gemm.x: gemm.cpp Makefile
 
 gemm_lt.x: gemm_lt.cpp calc_gemm_lt.cpp Makefile
 	$(CC) $(CFLAGS) -DUSE_CUBLASLT -o gemm_lt.x gemm_lt.cpp $(LIBS) -lcublasLt
+
+gemm_ex.x: gemm_ex.cpp Makefile
+	$(CC) $(CFLAGS) -o gemm_ex.x gemm_ex.cpp $(LIBS)
 
 gemm_mpi.x: gemm_mpi.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_mpi.x gemm_mpi.cpp $(LIBS) -lmpi
