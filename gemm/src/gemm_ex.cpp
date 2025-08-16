@@ -270,9 +270,8 @@ template <typename T> class Gemm {
     size_t N_;
 
     // Matrices on Host
-    T *h_matrixA;
-    T *h_matrixB;
-    T *h_matrixC;
+    // Matrix A, B, C have same size
+    T *h_matrix;
 
     // Matrices on Device
     T *d_matrixA;
@@ -293,7 +292,7 @@ template <typename T> class Gemm {
         TIME_SCOPE("Compute GEMM Warm-up");
         for (int w = 0; w < 10; ++w) {
             cublasStatus_t status = cublasGemmEx(
-                cublas_handle_, CUBLAS_OP_T, CUBLAS_OP_T, N_, N_, N_, &alpha, d_matrixA, CublasTraits<T>::data_type, N_,
+                cublas_handle_, CUBLAS_OP_N, CUBLAS_OP_N, N_, N_, N_, &alpha, d_matrixA, CublasTraits<T>::data_type, N_,
                 d_matrixB, CublasTraits<T>::data_type, N_, &beta, d_matrixC, CublasTraits<T>::data_type, N_,
                 CublasTraits<T>::compute_type, CublasTraits<T>::algo);
             handle_cublas_error(status, "gemmEx computation");
@@ -307,7 +306,7 @@ template <typename T> class Gemm {
         TIME_SCOPE("Compute GEMM");
         for (int r = 0; r < repeats; ++r) {
             cublasStatus_t status = cublasGemmEx(
-                cublas_handle_, CUBLAS_OP_T, CUBLAS_OP_T, N_, N_, N_, &alpha, d_matrixA, CublasTraits<T>::data_type, N_,
+                cublas_handle_, CUBLAS_OP_N, CUBLAS_OP_N, N_, N_, N_, &alpha, d_matrixA, CublasTraits<T>::data_type, N_,
                 d_matrixB, CublasTraits<T>::data_type, N_, &beta, d_matrixC, CublasTraits<T>::data_type, N_,
                 CublasTraits<T>::compute_type, CublasTraits<T>::algo);
             handle_cublas_error(status, "gemmEx computation");
@@ -320,53 +319,52 @@ template <typename T> class Gemm {
     bool gather_results() {
         TIME_SCOPE("Copy data from GPU to Host");
         std::cout << "Gather Results: Copy data from GPU to Host" << std::endl;
-        cudaError_t err = cudaMemcpy(h_matrixC, d_matrixC, sizeof(T) * N_ * N_, cudaMemcpyDeviceToHost);
+        cudaError_t err = cudaMemcpy(h_matrix, d_matrixC, sizeof(T) * N_ * N_, cudaMemcpyDeviceToHost);
         handle_cuda_error(err, "cudaMemcpy C host to device");
 
         cudaDeviceSynchronize();
         return true;
     }
 
-    bool allocate_host_matrices() {
-        TIME_SCOPE("Matrices Allocation and Initialization on Host");
-        std::cout << "Allocating Matrices on Host" << std::endl;
+    bool allocate_copy_host_matrices() {
+        TIME_SCOPE("Matrices Allocation and Transfer");
+        std::cout << "Allocating Matrices on Host and Copying to GPU" << std::endl;
 
         // Use regular malloc instead of pinned memory
-        h_matrixA = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
-        if (!h_matrixA) {
-            std::cerr << "malloc h_matrixA failed" << std::endl;
+        h_matrix = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
+        if (!h_matrix) {
+            std::cerr << "malloc h_matrix failed" << std::endl;
             return false;
         }
 
-        h_matrixB = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
-        if (!h_matrixB) {
-            std::cerr << "malloc h_matrixB failed" << std::endl;
-            free(h_matrixA);
-            h_matrixA = nullptr;
-            return false;
-        }
-
-        h_matrixC = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
-        if (!h_matrixC) {
-            std::cerr << "malloc h_matrixC failed" << std::endl;
-            free(h_matrixA);
-            free(h_matrixB);
-            h_matrixA = h_matrixB = nullptr;
-            return false;
-        }
-
-        // Initialize matrices with random values
+        // Initialize random value generator
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
 
-        for (long i = 0; i < N_ * N_; ++i) {
-            h_matrixA[i] = static_cast<T>(dis(gen));
-            h_matrixB[i] = static_cast<T>(dis(gen));
-            h_matrixC[i] = static_cast<T>(dis(gen));
+        // Initialize matrices and copying them to GPU
+        for (long long i = 0; i < N_ * N_; ++i) {
+            h_matrix[i] = static_cast<T>(dis(gen));
         }
+        cudaError_t err = cudaMemcpy(d_matrixA, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        handle_cuda_error(err, "cudaMemcpy A host to device");
+
+        for (long long i = 0; i < N_ * N_; ++i) {
+            h_matrix[i] = static_cast<T>(dis(gen));
+        }
+        err = cudaMemcpy(d_matrixB, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        handle_cuda_error(err, "cudaMemcpy B host to device");
+
+        for (long long i = 0; i < N_ * N_; ++i) {
+            h_matrix[i] = static_cast<T>(dis(gen));
+        }
+        err = cudaMemcpy(d_matrixC, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        handle_cuda_error(err, "cudaMemcpy C host to device");
+
+        cudaDeviceSynchronize();
         return true;
     }
+
     bool allocate_gpu_matrices() {
         TIME_SCOPE("Matrices Allocation on GPU");
         std::cout << "Allocating Matrics on GPU" << std::endl;
@@ -380,24 +378,6 @@ template <typename T> class Gemm {
 
         err = cudaMalloc(&d_matrixC, sizeof(T) * N_ * N_);
         handle_cuda_error(err, "cudaMalloc d_matrixC");
-
-        cudaDeviceSynchronize();
-        return true;
-    }
-
-    bool copy_matrices_host_gpu() {
-        TIME_SCOPE("Copy Data from Host to GPU");
-        std::cout << "Copy Data from Host to GPU" << std::endl;
-
-        // Copy from host to device
-        cudaError_t err = cudaMemcpy(d_matrixA, h_matrixA, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
-        handle_cuda_error(err, "cudaMemcpy A host to device");
-
-        err = cudaMemcpy(d_matrixB, h_matrixB, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
-        handle_cuda_error(err, "cudaMemcpy B host to device");
-
-        err = cudaMemcpy(d_matrixC, h_matrixC, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
-        handle_cuda_error(err, "cudaMemcpy C host to device");
 
         cudaDeviceSynchronize();
         return true;
@@ -426,12 +406,10 @@ template <typename T> class Gemm {
         cudaFree(d_matrixB);
         cudaFree(d_matrixC);
 
-        free(h_matrixA);
-        free(h_matrixB);
-        free(h_matrixC);
+        free(h_matrix);
         // Reset pointers
         d_matrixA = d_matrixB = d_matrixC = nullptr;
-        h_matrixA = h_matrixB = h_matrixC = nullptr;
+        h_matrix = nullptr;
     }
 
   private:
@@ -451,7 +429,7 @@ template <typename T> bool run_gemm(size_t N, int repeats, T alpha, T beta, cons
 
     gemm::Gemm<T> gemm(N);
 
-    return gemm.allocate_host_matrices() && gemm.allocate_gpu_matrices() && gemm.copy_matrices_host_gpu() &&
+    return gemm.allocate_gpu_matrices() && gemm.allocate_copy_host_matrices() &&
            gemm.setup_cublas() && gemm.compute_gemm_warmup(repeats, alpha, beta) &&
            gemm.compute_gemm(repeats, alpha, beta) && gemm.gather_results();
 }
