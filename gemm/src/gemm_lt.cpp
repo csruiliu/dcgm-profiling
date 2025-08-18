@@ -1,141 +1,500 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/time.h>
-
-#include <cuda_runtime.h>
-#include "cublas_v2.h"
 #include <cublasLt.h>
+#include <cublas_v2.h>
 #include <cuda_fp16.h>
+#include <cuda_runtime.h>
 
-// ------------------------------------------------------- //
-// Function: get_seconds
-// ------------------------------------------------------- //
-double get_seconds() {
-  struct timeval now;
-  gettimeofday(&now, NULL);
+#include <algorithm>
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <random>
+#include <string>
+#include <type_traits>
 
-  const double seconds = (double)now.tv_sec;
-  const double usec = (double)now.tv_usec;
+// C++11 compatible Timer class using RAII
+// This method may bring some minor performance overhead since it will include deconstruction time
+class Timer {
+  public:
+    Timer(const std::string &name) : name_(name), start_(std::chrono::high_resolution_clock::now()) {
+    }
 
-  return seconds + (usec * 1.0e-6);
+    ~Timer() {
+        std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+        std::chrono::milliseconds duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_);
+
+        std::vector<std::pair<std::string, double>> &timings = get_timings();
+
+        // Check if this timing already exists and update it, or add new entry
+        bool found = false;
+        for (std::vector<std::pair<std::string, double>>::iterator it = timings.begin(); it != timings.end(); ++it) {
+            if (it->first == name_) {
+                it->second = duration.count();
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            timings.push_back(std::make_pair(name_, duration.count()));
+        }
+    }
+
+    static void print_results(size_t N, int repeats, double alpha, double beta) {
+        std::cout << "\n=== Timing Results ===" << std::endl;
+
+        double total = 0;
+        double compute_time = 0;
+        const std::vector<std::pair<std::string, double>> &timings = get_timings();
+
+        // Calculate total time
+        for (std::vector<std::pair<std::string, double>>::const_iterator it = timings.begin(); it != timings.end();
+             ++it) {
+            if (it->first == "Total Execution") {
+                total = it->second;
+            }
+            if (it->first == "Compute GEMM") {
+                compute_time = it->second;
+            }
+        }
+
+        // If no "Total Execution" found, sum all timings
+        if (total == 0) {
+            std::cout << "No Total Execution, Sum all Timings" << std::endl;
+            for (std::vector<std::pair<std::string, double>>::const_iterator it = timings.begin(); it != timings.end();
+                 ++it) {
+                total += it->second;
+            }
+        }
+
+        // Print header
+        std::cout << std::left << std::setw(30) << "Operation" << std::right << std::setw(8) << "Time" << std::setw(4)
+                  << "" << std::setw(10) << "Percentage" << std::endl;
+        std::cout << std::string(52, '-') << std::endl;
+
+        // Print individual timings in insertion order
+        for (std::vector<std::pair<std::string, double>>::const_iterator it = timings.begin(); it != timings.end();
+             ++it) {
+            std::string operation = it->first + ":";
+
+            // Check if operation name is too long (more than 29 characters)
+            if (operation.length() > 29) {
+                // Generic break: try to break at space near the middle
+                size_t break_pos = operation.find(' ', operation.length() / 2);
+                std::string line1, line2;
+
+                if (break_pos != std::string::npos && break_pos < 29) {
+                    line1 = operation.substr(0, break_pos);
+                    line2 = operation.substr(break_pos + 1);
+                } else {
+                    // If no good break point, just truncate first line
+                    line1 = operation.substr(0, 26) + "...";
+                    line2 = operation.substr(26);
+                }
+
+                // Print first line (no timing info)
+                std::cout << std::left << std::setw(30) << line1 << std::endl;
+
+                // Print second line with timing info
+                std::cout << std::left << std::setw(30) << line2 << std::right << std::setw(6)
+                          << static_cast<long>(it->second) << std::setw(4) << " ms" << std::setw(7) << std::fixed
+                          << std::setprecision(1);
+            } else {
+                // Single line output for shorter names
+                std::cout << std::left << std::setw(30) << operation << std::right << std::setw(6)
+                          << static_cast<long>(it->second) << std::setw(4) << " ms" << std::setw(7) << std::fixed
+                          << std::setprecision(1);
+            }
+
+            if (total > 0) {
+                std::cout << "(" << (it->second / total * 100.0) << "%)";
+            } else {
+                std::cout << "(0.0%)";
+            }
+            std::cout << std::endl;
+        }
+
+        std::cout << std::string(52, '-') << std::endl;
+        std::cout << std::left << std::setw(30) << "Total:" << std::right << std::setw(6) << static_cast<long>(total)
+                  << std::setw(4) << " ms" << std::endl;
+
+        /*
+         * Printout Performance Results
+         */
+        long long flops_per_op = 0;
+
+        // Using a common calulation for FLOPs based on the GEMM operation
+        flops_per_op += 2LL * N * N * N - (N * N);
+
+        // 2. Scaling by alpha: alpha * (op(A) * op(B))
+        //    If alpha != 1.0, we need N×N additional multiplications
+        if (alpha != 1.0) {
+            flops_per_op += N * N;
+        }
+
+        // 3. Scaling by beta: beta * C
+        //    If beta != 0.0, we need N×N additional multiplications
+        if (beta != 0.0) {
+            flops_per_op += N * N;
+        }
+
+        // 4. Final addition: (alpha * op(A) * op(B)) + (beta * C)
+        //    If beta != 0.0, we need N×N additional additions
+        if (beta != 0.0) {
+            flops_per_op += N * N;
+        }
+
+        long long total_flops = flops_per_op * repeats;
+        double flops_per_second = total_flops / (compute_time / 1000);
+
+        std::cout << "\n=== Performance Results ===" << std::endl;
+        std::cout << "Matrix size: " << N << " x " << N << std::endl;
+        std::cout << "Repeats: " << repeats << std::endl;
+        std::cout << "Total FLOPs: " << total_flops << std::endl;
+        std::cout << "Total Computation Time: " << std::fixed << std::setprecision(3) << compute_time << " ms"
+                  << std::endl;
+
+        // Display in appropriate units
+        if (flops_per_second >= 1e12) {
+            std::cout << "Performance: " << std::fixed << std::setprecision(2) << flops_per_second / 1e12 << " TFLOPs"
+                      << std::endl;
+        } else if (flops_per_second >= 1e9) {
+            std::cout << "Performance: " << std::fixed << std::setprecision(2) << flops_per_second / 1e9 << " GFLOPs"
+                      << std::endl;
+        } else {
+            std::cout << "Performance: " << std::fixed << std::setprecision(2) << flops_per_second / 1e6 << " MFLOPs"
+                      << std::endl;
+        }
+    }
+
+    static void clear() {
+        get_timings().clear();
+    }
+
+  private:
+    std::string name_;
+    std::chrono::high_resolution_clock::time_point start_;
+
+    static std::vector<std::pair<std::string, double>> &get_timings() {
+        static std::vector<std::pair<std::string, double>> timings;
+        return timings;
+    }
+};
+
+// Convenient macro for timing scopes and use line number
+#define TIME_SCOPE(name) Timer timer_##__LINE__(name)
+
+// Printout cuda error message
+void handle_cuda_error(cudaError_t error, const std::string &operation) {
+    if (error != cudaSuccess) {
+        std::cerr << operation << " failed: " << cudaGetErrorString(error) << std::endl;
+        exit(1);
+    }
 }
 
-#define PRECISION 'S'
-#include "calc_gemm_lt.cpp"
-#undef PRECISION
+bool set_gpu_device(int gpu_id) {
+    TIME_SCOPE("GPU Device Setup");
 
-#define PRECISION 'D'
-#include "calc_gemm_lt.cpp"
-#undef PRECISION
+    // Check number of available GPUs
+    int device_count;
+    cudaError_t err = cudaGetDeviceCount(&device_count);
+    handle_cuda_error(err, "cudaGetDeviceCount");
 
-#define PRECISION 'H'
-#include "calc_gemm_lt.cpp"
-#undef PRECISION
+    if (device_count == 0) {
+        std::cerr << "No CUDA-capable devices found!" << std::endl;
+        return false;
+    }
 
-#define PRECISION 'I'
-#include "calc_gemm_lt.cpp"
-#undef PRECISION
+    if (gpu_id >= device_count || gpu_id < 0) {
+        std::cerr << "Invalid GPU ID: " << gpu_id << ". Available GPUs: 0-" << (device_count - 1) << std::endl;
+        return false;
+    }
+
+    // Set the device
+    err = cudaSetDevice(gpu_id);
+    handle_cuda_error(err, "cudaSetDevice");
+
+    // Get and print device properties
+    cudaDeviceProp prop;
+    err = cudaGetDeviceProperties(&prop, gpu_id);
+    handle_cuda_error(err, "cudaGetDeviceProperties");
+
+    std::cout << "\n=== GPU Device Information ===" << std::endl;
+    std::cout << "Using GPU " << gpu_id << ": " << prop.name << std::endl;
+    std::cout << "Compute Capability: " << prop.major << "." << prop.minor << std::endl;
+    std::cout << "Total Global Memory: " << (prop.totalGlobalMem / (1024 * 1024)) << " MB" << std::endl;
+    std::cout << "Max Threads per Block: " << prop.maxThreadsPerBlock << std::endl;
+    std::cout << "Multiprocessors: " << prop.multiProcessorCount << std::endl;
+    std::cout << "Memory Clock Rate: " << (prop.memoryClockRate / 1000) << " MHz" << std::endl;
+    std::cout << "Memory Bus Width: " << prop.memoryBusWidth << " bits" << std::endl;
+    std::cout << "Peak Memory Bandwidth: " << std::fixed << std::setprecision(1)
+              << (2.0 * prop.memoryClockRate * (prop.memoryBusWidth / 8) / 1.0e6) << " GB/s" << std::endl;
+    std::cout << "==============================" << std::endl;
+
+    return true;
+}
+
+namespace gemm {
+
+enum class Precision {
+    SINGLE = 'S',
+    DOUBLE = 'D',
+    HALF = 'H'
+};
+
+template <typename T> struct CublasTraits;
+
+template <> struct CublasTraits<float> {
+    static constexpr auto data_type = CUDA_R_32F;
+    static constexpr auto compute_type = CUBLAS_COMPUTE_32F;
+};
+
+template <> struct CublasTraits<double> {
+    static constexpr auto data_type = CUDA_R_64F;
+    static constexpr auto compute_type = CUBLAS_COMPUTE_64F;
+};
+
+template <> struct CublasTraits<__half> {
+    static constexpr auto data_type = CUDA_R_16F;
+    static constexpr auto compute_type = CUBLAS_COMPUTE_16F;
+};
+
+template <typename T> class Gemm {
+  private:
+    size_t N_;
+
+    // Matrices on Host
+    T *h_matrix;
+
+    // Matrices on Device
+    T *d_matrixA;
+    T *d_matrixB;
+    T *d_matrixC;
+
+    cublasLtHandle_t cublaslt_handle;
+    cublasLtMatrixLayout_t desc_matrixA, desc_matrixB, desc_matrixC;
+    cublasLtMatmulDesc_t desc_matmul;
+
+  public:
+    Gemm(size_t N) : N_(N) {
+    }
+
+    ~Gemm() {
+        cleanup();
+    }
+
+    size_t get_matrix_size() const {
+        return sizeof(T) * N_ * N_;
+    }
+
+    bool compute_gemm_warmup(int repeats, T alpha = T(1.0), T beta = T(0.0)) {
+        TIME_SCOPE("Compute GEMM Warm-up");
+        for (int w = 0; w < 10; ++w) {
+            cublasStatus_t status =
+                cublasLtMatmul(cublaslt_handle, desc_matmul, &alpha, d_matrixA, desc_matrixA, d_matrixB, desc_matrixB,
+                               &beta, d_matrixC, desc_matrixC, d_matrixC, desc_matrixC, nullptr, nullptr, 0, 0);
+            handle_cublas_error(status, "gemm computation");
+        }
+
+        cudaDeviceSynchronize();
+        return true;
+    }
+
+    bool compute_gemm(int repeats, T alpha = T(1.0), T beta = T(0.0)) {
+        TIME_SCOPE("Compute GEMM");
+        for (int r = 0; r < repeats; ++r) {
+            cublasStatus_t status =
+                cublasLtMatmul(cublaslt_handle, desc_matmul, &alpha, d_matrixA, desc_matrixA, d_matrixB, desc_matrixB,
+                               &beta, d_matrixC, desc_matrixC, d_matrixC, desc_matrixC, nullptr, nullptr, 0, 0);
+            handle_cublas_error(status, "gemm computation");
+        }
+
+        cudaDeviceSynchronize();
+        return true;
+    }
+
+    bool gather_results() {
+        TIME_SCOPE("Copy data from GPU to Host");
+        std::cout << "Gather Results: Copy data from GPU to Host" << std::endl;
+        cudaError_t err = cudaMemcpy(h_matrix, d_matrixC, get_matrix_size(), cudaMemcpyDeviceToHost);
+        handle_cuda_error(err, "cudaMemcpy C host to device");
+
+        cudaDeviceSynchronize();
+        return true;
+    }
+
+    bool allocate_copy_host_matrices() {
+        TIME_SCOPE("Matrices Allocation and Transfer");
+        std::cout << "Allocating Matrices on Host and Copying to GPU" << std::endl;
+
+        // Use regular malloc instead of pinned memory
+        h_matrix = static_cast<T *>(malloc(sizeof(T) * N_ * N_));
+        if (!h_matrix) {
+            std::cerr << "malloc h_matrix failed" << std::endl;
+            return false;
+        }
+
+        // Initialize random value generator
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
+
+        // Initialize matrices and copying them to GPU
+        for (long long i = 0; i < N_ * N_; ++i) {
+            h_matrix[i] = static_cast<T>(dis(gen));
+        }
+        cudaError_t err = cudaMemcpy(d_matrixA, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        handle_cuda_error(err, "cudaMemcpy A host to device");
+
+        for (long long i = 0; i < N_ * N_; ++i) {
+            h_matrix[i] = static_cast<T>(dis(gen));
+        }
+        err = cudaMemcpy(d_matrixB, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        handle_cuda_error(err, "cudaMemcpy B host to device");
+
+        for (long long i = 0; i < N_ * N_; ++i) {
+            h_matrix[i] = static_cast<T>(dis(gen));
+        }
+        err = cudaMemcpy(d_matrixC, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
+        handle_cuda_error(err, "cudaMemcpy C host to device");
+
+        cudaDeviceSynchronize();
+        return true;
+    }
+
+    bool allocate_gpu_matrices() {
+        TIME_SCOPE("Matrices Allocation on GPU");
+        std::cout << "Allocating Matrics on GPU" << std::endl;
+
+        // Allocate matrices on device
+        cudaError_t err = cudaMalloc(&d_matrixA, get_matrix_size());
+        handle_cuda_error(err, "cudaMalloc d_matrixA");
+
+        err = cudaMalloc(&d_matrixB, get_matrix_size());
+        handle_cuda_error(err, "cudaMalloc d_matrixB");
+
+        err = cudaMalloc(&d_matrixC, get_matrix_size());
+        handle_cuda_error(err, "cudaMalloc d_matrixC");
+
+        cudaDeviceSynchronize();
+        return true;
+    }
+
+    bool setup_cublas() {
+        cublasStatus_t status = cublasLtCreate(&cublaslt_handle);
+        handle_cublas_error(status, "cublasCreate");
+
+        // Create matrix layouts
+        cublasLtMatrixLayoutCreate(&desc_matrixA, CublasTraits<T>::data_type, N_, N_, N_);
+        cublasLtMatrixLayoutCreate(&desc_matrixB, CublasTraits<T>::data_type, N_, N_, N_);
+        cublasLtMatrixLayoutCreate(&desc_matrixC, CublasTraits<T>::data_type, N_, N_, N_);
+
+        // Create matmul descriptor with double precision scaling
+        cublasLtMatmulDescCreate(&desc_matmul, CublasTraits<T>::compute_type, CublasTraits<T>::data_type);
+
+        return true;
+    }
+
+    void cleanup() {
+        if (cublaslt_handle) {
+            cublasLtDestroy(cublaslt_handle);
+            cublaslt_handle = nullptr;
+        }
+
+        cudaFree(d_matrixA);
+        cudaFree(d_matrixB);
+        cudaFree(d_matrixC);
+
+        free(h_matrix);
+        // Reset pointers
+        d_matrixA = d_matrixB = d_matrixC = nullptr;
+        h_matrix = nullptr;
+        
+        // Destroy matrix layouts and matmul descriptor
+        cublasLtMatrixLayoutDestroy(desc_matrixA);
+        cublasLtMatrixLayoutDestroy(desc_matrixB);
+        cublasLtMatrixLayoutDestroy(desc_matrixC);
+        cublasLtMatmulDescDestroy(desc_matmul);
+    }
+
+  private:
+    void handle_cublas_error(cublasStatus_t status, const std::string &operation) {
+        if (status != CUBLAS_STATUS_SUCCESS) {
+            std::cerr << operation << " failed with cuBLAS error " << status << std::endl;
+            exit(1);
+        }
+    }
+};
+
+} // namespace gemm
+
+// Template function to eliminate code duplication
+template <typename T> bool run_gemm(size_t N, int repeats, T alpha, T beta, const std::string &precision_name) {
+    TIME_SCOPE("Total Execution");
+
+    gemm::Gemm<T> gemm(N);
+
+    return gemm.allocate_gpu_matrices() && gemm.allocate_copy_host_matrices() && gemm.setup_cublas() &&
+           gemm.compute_gemm_warmup(repeats, alpha, beta) && gemm.compute_gemm(repeats, alpha, beta) &&
+           gemm.gather_results();
+}
 
 int main(int argc, char *argv[]) {
-
-  int N = 4096;
-  int repeats = 100;
-  double alpha = 1.0;
-  double beta = 1.0;
-  char prec = 'D';
-
-  // ------------------------------------------------------- //
-  // Arguments Parsing
-  // ------------------------------------------------------- //
-  if (argc != 6) {
-    printf("Usage: %s <N> <repeats> <alpha> <beta> <precision: S|D|H|I>\n", argv[0]);
-    return 1;
-  }
-
-  N = atoi(argv[1]);
-  repeats = atoi(argv[2]);
-  alpha = atof(argv[3]);
-  beta = atof(argv[4]);
-  prec = argv[5][0];
-
-  printf("Matrix size input by command line: %d\n", N);
-  printf("Repeat multiply %d times.\n", repeats);
-  printf("Alpha =    %f\n", alpha);
-  printf("Beta  =    %f\n", beta);
-  printf("Precision =    %c\n", prec);
-
-
-  double time_taken;
-  int sizeof_gemm_t;
-  int status;
-  
-  switch (prec) {
-    case ('S'): {
-      float *matrixA, *matrixB, *matrixC, *matrixD;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &matrixD);
-      time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC, matrixD);
-      status = check_gemm(N, matrixA, matrixB, matrixC, matrixD);
-      free_gemm(matrixA, matrixB, matrixC, matrixD);
-      sizeof_gemm_t = sizeof(float);
-      break;
+    if (argc != 7) {
+        std::cout << "Usage: " << argv[0] << " <N> <repeats> <alpha> <beta> <precision(S/D/H)>" << std::endl;
+        std::cout << "  GPU_ID: GPU device ID (0, 1, 2, ...)" << std::endl;
+        std::cout << "  N: Matrix size (NxN)" << std::endl;
+        std::cout << "  repeats: Number of GEMM iterations" << std::endl;
+        std::cout << "  alpha, beta: GEMM coefficients" << std::endl;
+        std::cout << "  precision: S(ingle), D(ouble), or H(alf)" << std::endl;
+        return 1;
     }
-    case ('D'): {
-      double *matrixA, *matrixB, *matrixC, *matrixD;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &matrixD);
-      time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC, matrixD);
-      status = check_gemm(N, matrixA, matrixB, matrixC, matrixD);
-      free_gemm(matrixA, matrixB, matrixC, matrixD);
-      sizeof_gemm_t = sizeof(double);
-      break;
+
+    int gpu_id = std::atoi(argv[1]);
+    size_t N = std::atoi(argv[2]);
+    int repeats = std::atoi(argv[3]);
+    double alpha = std::atof(argv[4]);
+    double beta = std::atof(argv[5]);
+    char precision = argv[6][0];
+
+    // MODIFIED: Set GPU device before any CUDA operations
+    if (!set_gpu_device(gpu_id)) {
+        return 1;
     }
-    case ('H'): {
-      __half *matrixA, *matrixB, *matrixC, *matrixD;
-      alloc_gemm(N, &matrixA, &matrixB, &matrixC, &matrixD);
-      time_taken = calc_gemm(repeats, N, alpha, beta, matrixA, matrixB, matrixC, matrixD);
-      status = check_gemm(N, matrixA, matrixB, matrixC, matrixD);
-      free_gemm(matrixA, matrixB, matrixC, matrixD);
-      sizeof_gemm_t = sizeof(__half);
-      break;
+
+    std::cout << "Starting distributed GEMM with:" << std::endl;
+    std::cout << "  GPU ID: " << gpu_id << std::endl;
+    std::cout << "  Matrix size: " << N << "x" << N << std::endl;
+    std::cout << "  Repeats: " << repeats << std::endl;
+    std::cout << "  Precision: " << precision << std::endl;
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    try {
+        bool success = false;
+        switch (precision) {
+        case 'S':
+            success = run_gemm<float>(N, repeats, static_cast<float>(alpha), static_cast<float>(beta), "Single");
+            break;
+        case 'D':
+            success = run_gemm<double>(N, repeats, alpha, beta, "Double");
+            break;
+        case 'H':
+            success = run_gemm<__half>(N, repeats, static_cast<__half>(alpha), static_cast<__half>(beta), "Half");
+            break;
+        default:
+            std::cerr << "Invalid precision. Use S, D, or H" << std::endl;
+            return 1;
+        }
+        if (success) {
+            std::cout << precision << " precision GEMM completed successfully" << std::endl;
+        }
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        return 1;
     }
-    case ('I'): {
-      int8_t *matrixA;
-      int8_t *matrixB;
-      int32_t *matrixC;
-      alloc_gemm_int(N, &matrixA, &matrixB, &matrixC);
-      // time_taken = calc_gemm_int(repeats, N, alpha, beta, matrixA, matrixB, matrixC);
-      // status = check_gemm_int(N, matrixA, matrixB, matrixC);
-      // free_gemm_int(matrixA, matrixB, matrixC);
-      sizeof_gemm_t = sizeof(int32_t);
-      break;
-    }
-  }
 
-
-  // ------------------------------------------------------- //
-  // Print results
-  // ------------------------------------------------------- //
-  printf("\n");
-  printf("===============================================================\n");
-
-  double N_dbl = (double)N;
-  double matrix_memory = (3 * N_dbl * N_dbl) * ((double)sizeof_gemm_t);
-
-  printf("Memory for Matrices:  %f MB\n", (matrix_memory / (1000 * 1000)));
-
-  printf("Multiply time:        %f seconds\n", time_taken);
-
-  const double ops_computed = ((N_dbl * N_dbl * N_dbl * 2.0) + (N_dbl * N_dbl * 3.0)) * (double)(repeats);
-
-  if (prec == 'I') {
-    // mprintf("FLOPs computed:       %f\n", flops_computed);
-    printf("TOP/s rate:         %f TOP/s\n", (ops_computed / time_taken) / 1.0e12);
-  } else {
-    // mprintf("FLOPs computed:       %f\n", flops_computed);
-    printf("GFLOP/s rate:         %f GF/s\n", (ops_computed / time_taken) / 1.0e9);
-  }
-
-  printf("===============================================================\n");
-  printf("\n");
-  
-  return 0;
+    Timer::print_results(N, repeats, alpha, beta);
+    return 0;
 }
