@@ -8,8 +8,8 @@ all: gemm.x gemm_lt.x gemm_mpi.x gemm_bursty.x gemm_bursty_stream.x gemm_interle
 gemm.x: gemm.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm.x gemm.cpp $(LIBS)
 
-gemm_lt.x: gemm_lt.cpp calc_gemm_lt.cpp Makefile
-	$(CC) $(CFLAGS) -DUSE_CUBLASLT -o gemm_lt.x gemm_lt.cpp $(LIBS) -lcublasLt
+gemm_lt.x: gemm_lt.cpp Makefile
+	$(CC) $(CFLAGS) -o gemm_lt.x gemm_lt.cpp $(LIBS) -lcublasLt
 
 gemm_ex.x: gemm_ex.cpp Makefile
 	$(CC) $(CFLAGS) -o gemm_ex.x gemm_ex.cpp $(LIBS)
