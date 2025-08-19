@@ -32,17 +32,17 @@ dcgm_metrics=""
 #dcgm_metrics+="210,"  #mem_util_samples
 #dcgm_metrics+="211,"  #gpu_util_samples
 
-#dcgm_metrics+="1001," #gr_engine_active
+dcgm_metrics+="1001," #gr_engine_active
 #dcgm_metrics+="1002," #sm_active
 #dcgm_metrics+="1003," #sm_occupancy
-#dcgm_metrics+="1004," #tensor_active
-#dcgm_metrics+="1005," #dram_active
-#dcgm_metrics+="1006," #fp64_active
-#dcgm_metrics+="1007," #fp32_active
-#dcgm_metrics+="1008," #fp16_active
+dcgm_metrics+="1004," #tensor_active
+dcgm_metrics+="1005," #dram_active
+dcgm_metrics+="1006," #fp64_active
+dcgm_metrics+="1007," #fp32_active
+dcgm_metrics+="1008," #fp16_active
 
-#dcgm_metrics+="1009," #pcie_tx_bytes
-#dcgm_metrics+="1010," #pcie_rx_bytes
+dcgm_metrics+="1009," #pcie_tx_bytes
+dcgm_metrics+="1010," #pcie_rx_bytes
 dcgm_metrics+="1011," #nvlink_tx_bytes
 dcgm_metrics+="1012," #nvlink_rx_bytes
 
@@ -56,8 +56,8 @@ dcgm_metrics="${dcgm_metrics%?}"
 dcgm_outfile=dcgm.d$dcgm_delay.$SLURM_JOB_ID.$SLURM_STEP_ID-$SLURM_NODEID.out
 
 if [[ $SLURM_LOCALID -eq 0 ]]; then
-    #dcgmi dmon -d $dcgm_delay -e $dcgm_metrics > $SLURM_NODEID.dcgm &
-    dcgmi dmon -d $dcgm_delay -e $dcgm_metrics > $RESULTS_DIR/$dcgm_outfile &
+    #dcgmi dmon -d $dcgm_delay -e $dcgm_metrics > $RESULTS_DIR/$dcgm_outfile &
+    podman-hpc exec -it dcgm-container dcgmi dmon -d $dcgm_delay -e $dcgm_metrics > $RESULTS_DIR/$dcgm_outfile &
     dcgmi_pid=$!
 fi
 
