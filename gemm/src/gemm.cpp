@@ -11,6 +11,7 @@
 #include <random>
 #include <string>
 #include <type_traits>
+#include <sys/time.h>
 
 
 // C++11 compatible Timer class using RAII
@@ -145,7 +146,7 @@ class Timer {
         }
 
         long long total_flops = flops_per_op * repeats;
-        double flops_per_second = total_flops / (compute_time / 1000);
+        double flops_per_second = total_flops / (compute_time / 1000.0);
 
         std::cout << "\n=== Performance Results ===" << std::endl;
         std::cout << "Matrix size: " << N << " x " << N << std::endl;
@@ -288,9 +289,9 @@ template <typename T> class Gemm {
     bool compute_gemm_warmup(int repeats, T alpha = T(1.0), T beta = T(0.0)) {
         TIME_SCOPE("Compute GEMM Warm-up");
         for (int w = 0; w < 10; ++w) {
-            cublasStatus_t status = CublasTraits<T>::gemm_func(cublas_handle_, CUBLAS_OP_N, CUBLAS_OP_N, N_,
-                                                               N_, N_, &alpha, d_matrixA, N_,
-                                                               d_matrixB, N_, &beta, d_matrixC, N_);
+            cublasStatus_t status =
+                CublasTraits<T>::gemm_func(cublas_handle_, CUBLAS_OP_N, CUBLAS_OP_T, N_, N_, N_, &alpha, d_matrixA, N_,
+                                           d_matrixB, N_, &beta, d_matrixC, N_);
             handle_cublas_error(status, "gemm computation");
         }
 
@@ -301,9 +302,9 @@ template <typename T> class Gemm {
     bool compute_gemm(int repeats, T alpha = T(1.0), T beta = T(0.0)) {
         TIME_SCOPE("Compute GEMM");
         for (int r = 0; r < repeats; ++r) {
-            cublasStatus_t status = CublasTraits<T>::gemm_func(cublas_handle_, CUBLAS_OP_N, CUBLAS_OP_N, N_,
-                                                               N_, N_, &alpha, d_matrixA, N_,
-                                                               d_matrixB, N_, &beta, d_matrixC, N_);
+            cublasStatus_t status =
+                CublasTraits<T>::gemm_func(cublas_handle_, CUBLAS_OP_N, CUBLAS_OP_T, N_, N_, N_, &alpha, d_matrixA, N_,
+                                           d_matrixB, N_, &beta, d_matrixC, N_);
             handle_cublas_error(status, "gemm computation");
         }
 
@@ -339,19 +340,22 @@ template <typename T> class Gemm {
 
         // Initialize matrices and copying them to GPU
         for (long long i = 0; i < N_ * N_; ++i) {
-            h_matrix[i] = static_cast<T>(dis(gen));
+            //h_matrix[i] = static_cast<T>(dis(gen));
+            h_matrix[i] = static_cast<T>(rand() / RAND_MAX);
         }
         cudaError_t err = cudaMemcpy(d_matrixA, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy A host to device");
 
         for (long long i = 0; i < N_ * N_; ++i) {
-            h_matrix[i] = static_cast<T>(dis(gen));
+            //h_matrix[i] = static_cast<T>(dis(gen));
+            h_matrix[i] = static_cast<T>(rand() / RAND_MAX);
         }
         err = cudaMemcpy(d_matrixB, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy B host to device");
 
         for (long long i = 0; i < N_ * N_; ++i) {
-            h_matrix[i] = static_cast<T>(dis(gen));
+            //h_matrix[i] = static_cast<T>(dis(gen));
+            h_matrix[i] = static_cast<T>(rand() / RAND_MAX);
         }
         err = cudaMemcpy(d_matrixC, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy C host to device");
@@ -384,9 +388,6 @@ template <typename T> class Gemm {
 
         status = cublasSetMathMode(cublas_handle_, CublasTraits<T>::math_mode);
         handle_cublas_error(status, "cublasSetMathMode");
-
-        status = cublasSetAtomicsMode(cublas_handle_, CUBLAS_ATOMICS_ALLOWED);
-        handle_cublas_error(status, "cublasSetAtomicsMode");
 
         return true;
     }
@@ -424,9 +425,9 @@ template <typename T> bool run_gemm(size_t N, int repeats, T alpha, T beta, cons
 
     gemm::Gemm<T> gemm(N);
 
-    return gemm.allocate_gpu_matrices() && gemm.allocate_copy_host_matrices() &&
-           gemm.setup_cublas() && gemm.compute_gemm_warmup(repeats, alpha, beta) &&
-           gemm.compute_gemm(repeats, alpha, beta) && gemm.gather_results();
+    return gemm.allocate_gpu_matrices() && gemm.allocate_copy_host_matrices() && gemm.setup_cublas() &&
+           gemm.compute_gemm_warmup(repeats, alpha, beta) && gemm.compute_gemm(repeats, alpha, beta) &&
+           gemm.gather_results();
 }
 
 int main(int argc, char *argv[]) {
