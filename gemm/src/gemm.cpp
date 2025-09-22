@@ -336,7 +336,7 @@ template <typename T> class Gemm {
         // Initialize random value generator
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
+        std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
         // Initialize matrices and copying them to GPU
         for (long long i = 0; i < N_ * N_; ++i) {
