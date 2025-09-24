@@ -341,21 +341,21 @@ template <typename T> class Gemm {
         // Initialize matrices and copying them to GPU
         for (long long i = 0; i < N_ * N_; ++i) {
             //h_matrix[i] = static_cast<T>(dis(gen));
-            h_matrix[i] = static_cast<T>(rand() / RAND_MAX);
+            h_matrix[i] = static_cast<T>((float)rand() / RAND_MAX);
         }
         cudaError_t err = cudaMemcpy(d_matrixA, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy A host to device");
 
         for (long long i = 0; i < N_ * N_; ++i) {
             //h_matrix[i] = static_cast<T>(dis(gen));
-            h_matrix[i] = static_cast<T>(rand() / RAND_MAX);
+            h_matrix[i] = static_cast<T>((float)rand() / RAND_MAX);
         }
         err = cudaMemcpy(d_matrixB, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy B host to device");
 
         for (long long i = 0; i < N_ * N_; ++i) {
             //h_matrix[i] = static_cast<T>(dis(gen));
-            h_matrix[i] = static_cast<T>(rand() / RAND_MAX);
+            h_matrix[i] = static_cast<T>((float)rand() / RAND_MAX);
         }
         err = cudaMemcpy(d_matrixC, h_matrix, sizeof(T) * N_ * N_, cudaMemcpyHostToDevice);
         handle_cuda_error(err, "cudaMemcpy C host to device");
