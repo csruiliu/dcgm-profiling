@@ -84,15 +84,19 @@ metric_target_mappings = {
 }
 
 prec_ref_mappings = {
-    'double': 'ref_fp64_tensor',
-    'single': 'ref_tf32_tensor',
-    'half': 'ref_fp16_tensor'
+    'tf64': 'ref_fp64_tensor',
+    'fp64': 'ref_fp64',
+    'tf32': 'ref_fp32_tensor',
+    'fp32': 'ref_fp32',
+    'tf16': 'ref_fp16_tensor'
 }
 
 prec_target_mappings = {
-    'double': 'target_fp64_tensor',
-    'single': 'target_tf32_tensor',
-    'half': 'target_fp16_tensor'
+    'tf64': 'target_fp64_tensor',
+    'fp64': 'target_fp64',
+    'tf32': 'target_fp32_tensor',
+    'fp32': 'target_fp32',
+    'tf16': 'target_fp16_tensor'
 }
 
 def get_gpu_specs(gpu_arch, prefix):
@@ -181,15 +185,11 @@ def process_file(file_path, metric_names):
 def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, gpu_arch, precision):
     sample_intv = sample_interval_ms / 1000
     
-    if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
-        hw_pcie_gb = 64
-        hw_nvlink_gb = 600
-    else:
-        raise ValueError("Reference GPU arch is not recognized")
-
     t_total_list = list()
     t_flop_list = list()
     t_dram_list = list()
+
+    ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
 
     for row in profiled_df.itertuples(index=False):
         # row is a namedtuple, you can access columns via row.<colname>
@@ -210,9 +210,9 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         
         t_otherGPU = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline)
 
-        t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (hw_pcie_gb * 1e9) 
+        t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (ref_gpu_spec["ref_pcie_bw"] * 1e9) 
 
-        t_nvlink = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (hw_nvlink_gb * 1e9)
+        t_nvlink = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (ref_gpu_spec["ref_nvlink_bw"] * 1e9)
 
         t_otherNode = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie - t_nvlink)
 
@@ -231,8 +231,6 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         t_total_list_finish = t_total_list
         t_flop_list_finish = t_flop_list
         t_dram_list_finish = t_dram_list
-
-    ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
@@ -495,15 +493,15 @@ def main():
     parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
                         help='indicate the timestamp for overall runtime in milliseconds')
     parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
-                        choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
+                        choices=['A100-40', 'A100-80', 'H100'], help='indicate the reference gpu architecture')
     parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
                         choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 
                                  'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14', 'GPU-M-IO-A-H22', 'GPU-F-IO-A-H22', 'GPU-M-IO-A-H24', 'GPU-F-IO-A-H24'], 
                         help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
-    parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['double', 'single', 'half'],
-                        help='Specify the precision type: double (FP64), single (FP32), half (FP16), or tensor (Tensor ops). Default: single')
+    parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['tf64', 'fp64', 'tf32', 'fp32', 'tf16'],
+                        help='Specify the precision type: TF64 (FP64 Tensor), FP64, TF32 (FP32 Tensor), FP32, TF16 (FP16 Tensor) . Default: single')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, default=1.0,
                         help='indicate the estimated flops utlization when bound swtich')
     parser.add_argument('-mu', '--mem_util', action='store', type=float, default=1.0,
