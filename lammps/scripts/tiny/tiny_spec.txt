@@ -1,0 +1,7 @@
+spec=tiny
+nn=128
+BENCH_SPEC="\
+        -in common/in.snap.test \
+        -var snapdir common/2J8_W.SNAP \
+        -var nx $nn -var ny $nn -var nz $nn \
+        -var nsteps 100"
