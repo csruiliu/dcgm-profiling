@@ -500,7 +500,7 @@ def main():
                         help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
-    parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['tf64', 'fp64', 'tf32', 'fp32', 'tf16'],
+    parser.add_argument('-p', '--precision', type=str, required=True, choices=['tf64', 'fp64', 'tf32', 'fp32', 'tf16'],
                         help='Specify the precision type: TF64 (FP64 Tensor), FP64, TF32 (FP32 Tensor), FP32, TF16 (FP16 Tensor) . Default: single')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, default=1.0,
                         help='indicate the estimated flops utlization when bound swtich')
