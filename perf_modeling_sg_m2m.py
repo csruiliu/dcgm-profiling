@@ -7,47 +7,47 @@ import numpy as np
 # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
 GPU_SPECS = {
     "A100-40": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
         "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
     },
     "A100-80": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
         "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
     },
     "A40": {
-        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8, "fp16": 37.4, "fp16_tensor": 149.7, 
+        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8, "fp16": 37.4, "fp16_tensor": 149.7, 
         "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, "base_clock": 1305, "boost_clock": 1740, "num_streams": 84
     },
     "H100": {  # H100 SXM (default)
-        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
+        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
         "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, "base_clock": 1590, "boost_clock": 1980, "num_streams": 132
     },
     "R100": {
-        "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "tf32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
+        "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "fp32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
         "mem_bw": 1555*8.0, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
     "R100-UNI": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "tf32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "fp32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
         "mem_bw": 1555*1.5, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
     "GPU-M-IO-A-H14": {
-        "fp64": 9.7*1.0, "fp64_tensor": 19.5*1.0, "fp32": 19.5*1.0, "tf32_tensor": 156*1.0, "fp16": 78*1.0, "fp16_tensor": 312*1.0, 
+        "fp64": 9.7*1.0, "fp64_tensor": 19.5*1.0, "fp32": 19.5*1.0, "fp32_tensor": 156*1.0, "fp16": 78*1.0, "fp16_tensor": 312*1.0, 
         "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 1.0, "alpha_cpu": 3.0,
     },
     "GPU-F-IO-A-H14": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "tf32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "fp32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
         "mem_bw": 1555*1.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
     "GPU-M-IO-A-H22": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
         "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
     },
     "GPU-F-IO-A-H22": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
         "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
     },
     "GPU-M-IO-A-H24": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
         "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
     },
     "GPU-F-IO-A-H24": {
