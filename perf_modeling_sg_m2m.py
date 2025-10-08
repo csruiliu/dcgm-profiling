@@ -184,6 +184,7 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     t_total_list = list()
     t_flop_list = list()
     t_dram_list = list()
+    t_total_roofline_ref_list = list()
 
     ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
 
@@ -203,7 +204,8 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         t_dram_list.append(t_dram)
 
         t_roofline = max(t_flop, t_dram)
-        
+        t_total_roofline_ref_list.append(t_roofline)
+
         t_otherGPU = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline)
 
         t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (ref_gpu_spec["ref_pcie_bw"] * 1e9) 
@@ -223,10 +225,12 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         t_total_list_finish = t_total_list[:finish_idx]
         t_flop_list_finish = t_flop_list[:finish_idx]
         t_dram_list_finish = t_dram_list[:finish_idx]
+        t_total_roofline_ref_list_finish = t_total_roofline_ref_list[:finish_idx]
     else:
         t_total_list_finish = t_total_list
         t_flop_list_finish = t_flop_list
         t_dram_list_finish = t_dram_list
+        t_total_roofline_ref_list_finish = t_total_roofline_ref_list
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
@@ -242,6 +246,8 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
             t_total_list_slice = t_total_list_finish[start_idx:end_idx]
             t_flop_list_slice = t_flop_list[start_idx:end_idx]
             t_dram_list_slice = t_dram_list[start_idx:end_idx]
+            t_total_roofline_ref_list_slice = t_total_roofline_ref_list_finish[start_idx:end_idx]
+            
         else:
             t_total_list_slice = []
             t_flop_list_slice = []
@@ -251,6 +257,7 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         flop = np.mean(t_flop_list_slice) / sample_intv * ref_gpu_spec[prec_ref_mappings[precision]]
         dram = np.mean(t_dram_list_slice) / sample_intv * ref_gpu_spec["ref_mem_bw"]
         print(f"Estimate TFLOPS on Reference Hardware: {flop:0.2f}")
+        print(f"Estimate Roofline Time On Reference Hardware: {sum(t_total_roofline_ref_list_slice):0.2f}")
         print(f"Estimate GPU Memory Bandwidth on Reference Hardware: {dram:0.2f}")
         print(f"Estimate Runtime of Analysis Window On Reference Hardware: {sum(t_total_list_slice):0.2f}")
         return 
@@ -258,6 +265,7 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     flop = np.mean(t_flop_list_finish) / sample_intv * ref_gpu_spec[prec_ref_mappings[precision]]
     dram = np.mean(t_dram_list_finish) / sample_intv * ref_gpu_spec["ref_mem_bw"]
     print(f"Estimate TFLOPS on Reference Hardware: {flop:0.2f}")
+    print(f"Estimate Roofline Time On Reference Hardware: {sum(t_total_roofline_ref_list_finish):0.2f}")
     print(f"Estimate GPU Memory Bandwidth on Reference Hardware: {dram:0.2f}")
     print(f"Estimate Overall Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
     return
