@@ -7,77 +7,50 @@ import re
 from collections import Counter
 
 
-# Mapping from metric names to GPU spec keys
-metric_ref_mappings = {
-    'TENSO': 'ref_fp64_tensor',
-    'FP64A': 'ref_fp64',
-    'FP32A': 'ref_fp32',
-    'FP16A': 'ref_fp16'
-}
-
-metric_target_mappings = {
-    'TENSO': 'target_fp64_tensor',
-    'FP64A': 'target_fp64',
-    'FP32A': 'target_fp32',
-    'FP16A': 'target_fp16'
-}
-
-prec_ref_mappings = {
-    'double': 'ref_fp64_tensor',
-    'single': 'ref_tf32_tensor',
-    'half': 'ref_fp16_tensor'
-}
-
-prec_target_mappings = {
-    'double': 'target_fp64_tensor',
-    'single': 'target_tf32_tensor',
-    'half': 'target_fp16_tensor'
-}
-
 # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
 GPU_SPECS = {
     "A100-40": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
         "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
     },
     "A100-80": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "tf32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
+        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
         "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
     },
     "A40": {
-        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "tf32_tensor": 74.8, "fp16": 37.4, "fp16_tensor": 149.7, 
+        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8, "fp16": 37.4, "fp16_tensor": 149.7, 
         "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, "base_clock": 1305, "boost_clock": 1740, "num_streams": 84
     },
     "H100": {  # H100 SXM (default)
-        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "tf32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
+        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
         "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, "base_clock": 1590, "boost_clock": 1980, "num_streams": 132
     },
     "R100": {
-        "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "tf32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
+        "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "fp32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
         "mem_bw": 1555*8.0, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
     "R100-UNI": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "tf32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "fp32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
         "mem_bw": 1555*1.5, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
     "GPU-M-IO-A-H14": {
-        "fp64": 9.7*1.0, "fp64_tensor": 19.5*1.0, "fp32": 19.5*1.0, "tf32_tensor": 156*1.0, "fp16": 78*1.0, "fp16_tensor": 312*1.0, 
+        "fp64": 9.7*1.0, "fp64_tensor": 19.5*1.0, "fp32": 19.5*1.0, "fp32_tensor": 156*1.0, "fp16": 78*1.0, "fp16_tensor": 312*1.0, 
         "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 1.0, "alpha_cpu": 3.0,
     },
     "GPU-F-IO-A-H14": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "tf32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
+        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "fp32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
         "mem_bw": 1555*1.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
     },
     "GPU-M-IO-A-H22": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
         "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
     },
     "GPU-F-IO-A-H22": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
         "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
     },
     "GPU-M-IO-A-H24": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "tf32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
+        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
         "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
     },
     "GPU-F-IO-A-H24": {
@@ -98,6 +71,45 @@ HOST_SPECS = {
     }
 }
 
+# Mapping from metric names to GPU spec keys
+metric_ref_mappings = {
+    'TENSO': 'ref_fp64_tensor',
+    'FP64A': 'ref_fp64',
+    'FP32A': 'ref_fp32',
+    'FP16A': 'ref_fp16'
+}
+
+metric_target_mappings = {
+    'TENSO': 'target_fp64_tensor',
+    'FP64A': 'target_fp64',
+    'FP32A': 'target_fp32',
+    'FP16A': 'target_fp16'
+}
+
+prec_ref_mappings = {
+    'tf64': 'ref_fp64_tensor',
+    'fp64': 'ref_fp64',
+    'tf32': 'ref_fp32_tensor',
+    'fp32': 'ref_fp32',
+    'tf16': 'ref_fp16_tensor'
+}
+
+prec_target_mappings = {
+    'tf64': 'target_fp64_tensor',
+    'fp64': 'target_fp64',
+    'tf32': 'target_fp32_tensor',
+    'fp32': 'target_fp32',
+    'tf16': 'target_fp16_tensor'
+}
+
+def get_gpu_specs(gpu_arch, prefix):
+    """Get GPU specifications with appropriate prefix."""
+    try:
+        specs = GPU_SPECS.get(gpu_arch)
+        return {f"{prefix}_{key}": value for key, value in specs.items()}
+    except KeyError:
+        print("GPU architect is not found in GPU SPEC DICT")
+
 # Define a custom argument type for a list of strings
 def list_of_strings(arg):
     return arg.split(',')
@@ -112,7 +124,7 @@ def is_number(value):
 # Function to read the file and process the data
 def process_single_file(num_gpu, file_path, metric_names):
     # Initialize a dict to hold data lists for each GPU
-    gpu_data = {i: [] for i in range(num_gpu)}
+    gpu_data = dict()
 
     column_mapping = {}
     header_parsed = False
@@ -159,8 +171,9 @@ def process_single_file(num_gpu, file_path, metric_names):
                     raise ValueError("Cannot extract GPU ID")
 
                 gpu_id = int(gpu_match.group(1))
-                if gpu_id >= num_gpu:
-                    raise ValueError("The GPU ID exceeds the number of GPUs")
+
+                if gpu_id not in gpu_data:
+                    gpu_data[gpu_id] = []
 
                 # Extract data values (skip the GPU identifier)
                 data_values = parts[1:]
@@ -187,9 +200,9 @@ def process_single_file(num_gpu, file_path, metric_names):
     
     # Create DataFrames with the requested metrics as columns
     gpu_dfs = []
-    for i in range(num_gpu):
-        if gpu_data[i]:
-            df = pd.DataFrame(gpu_data[i], columns=metric_names)
+    for gpu_id in sorted(gpu_data.keys()):
+        if gpu_data[gpu_id]:
+            df = pd.DataFrame(gpu_data[gpu_id], columns=metric_names)
             gpu_dfs.append(df)
         else:
             # Create empty DataFrame with correct columns if no data
@@ -310,7 +323,7 @@ def process_multiple_files_single_gpu(file_paths, metric_names):
 
                     # Convert to numeric and extract only requested metrics in specified order
                     try:
-                        numeric_values = [float(x) for x in data_values]
+                        numeric_values = [0.0 if x.strip().lower() == 'n/a' else float(x) for x in data_values]
                         
                         # Extract requested metrics in the order specified by user
                         selected_metrics = []
@@ -446,16 +459,12 @@ def perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts,
 def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, gpu_arch):
     finish_idx = int(overall_runtime_ms / sample_interval_ms)
     
-    if gpu_arch == 'A100-40' or gpu_arch == 'A100-80':
-        hw_pcie_gb = 64
-        hw_nvlink_gb = 600
-    else:
-        raise ValueError("Reference GPU arch is not recognized")
+    ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
 
     t_total_dict = dict()
     for i, df in enumerate(gpu_dfs):
         if not df.empty:
-            t_totals = perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, hw_pcie_gb, hw_nvlink_gb)
+            t_totals = perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, ref_gpu_spec["ref_pcie_bw"], ref_gpu_spec["ref_nvlink_bw"])
             t_total_dict[f"GPU{i}"] = t_totals
         else:
             raise ValueError("The total time list is empty")
@@ -782,15 +791,15 @@ def main():
     parser.add_argument('-a', '--aggregate_interval_ms', action='store', type=int, required=True,
                         help='indicate the time interval for aggregation in milliseconds') 
     parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
-                        choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
+                        choices=['A100-40', 'A100-80', 'H100'], help='indicate the reference gpu architecture')
     parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
                         choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 
                                  'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14', 'GPU-M-IO-A-H22', 'GPU-F-IO-A-H22', 'GPU-M-IO-A-H24', 'GPU-F-IO-A-H24'], 
                         help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
-    parser.add_argument('-p', '--precision', type=str, required=False,  default='double', choices=['double', 'single', 'half'],
-                        help='Specify the precision type: double (FP64), single (FP32), half (FP16), or tensor (Tensor ops). Default: single')
+    parser.add_argument('-p', '--precision', type=str, required=True, choices=['tf64', 'fp64', 'tf32', 'fp32', 'tf16'],
+                        help='Specify the precision type: TF64 (FP64 Tensor), FP64, TF32 (FP32 Tensor), FP32, TF16 (FP16 Tensor) . Default: single')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, default=1.0,
                         help='indicate the estimated flops utlization when bound swtich')
     parser.add_argument('-mu', '--mem_util', action='store', type=float, default=1.0,
@@ -812,7 +821,7 @@ def main():
     precision = args.precision
 
     profiled_df = process_files(num_gpu, dcgm_input, metrics)
-
+    print(profiled_df)
     perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch)
     
     if target_gpu_arch is not None:
