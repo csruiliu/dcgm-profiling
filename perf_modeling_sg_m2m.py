@@ -85,17 +85,13 @@ metric_target_mappings = {
 
 prec_ref_mappings = {
     'tf64': 'ref_fp64_tensor',
-    'fp64': 'ref_fp64',
     'tf32': 'ref_fp32_tensor',
-    'fp32': 'ref_fp32',
     'tf16': 'ref_fp16_tensor'
 }
 
 prec_target_mappings = {
     'tf64': 'target_fp64_tensor',
-    'fp64': 'target_fp64',
     'tf32': 'target_fp32_tensor',
-    'fp32': 'target_fp32',
     'tf16': 'target_fp16_tensor'
 }
 
@@ -128,7 +124,7 @@ def process_file(file_path, metric_names):
     header_columns = None
     metric_indices = None
 
-    gpu_pattern = re.compile(rf'^GPU 0\s')
+    gpu_pattern = re.compile(rf'^GPU 7\s')
     header_pattern = re.compile(r'^#Entity')
 
     # Read the file
@@ -500,8 +496,8 @@ def main():
                         help='indicate the target gpu architecture')
     parser.add_argument('--metrics', type=list_of_strings, required=True, 
                         help='List of metrics, basically the not-none col names')
-    parser.add_argument('-p', '--precision', type=str, required=True, choices=['tf64', 'fp64', 'tf32', 'fp32', 'tf16'],
-                        help='Specify the precision type: TF64 (FP64 Tensor), FP64, TF32 (FP32 Tensor), FP32, TF16 (FP16 Tensor) . Default: single')
+    parser.add_argument('-tp', '--tensor_precision', type=str, required=True, choices=['tf64', 'tf32', 'tf16'],
+                        help='Specify the tensor precision type: TF64 (FP64 Tensor), TF32 (FP32 Tensor), TF16 (FP16 Tensor)')
     parser.add_argument('-fu', '--flop_util', action='store', type=float, default=1.0,
                         help='indicate the estimated flops utlization when bound swtich')
     parser.add_argument('-mu', '--mem_util', action='store', type=float, default=1.0,
@@ -521,7 +517,7 @@ def main():
     precision = args.precision
 
     profiled_df = process_file(dcgm_metric_file, metrics)
-    
+    print(profiled_df)
     perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, precision)
     
     if target_gpu_arch is not None:
