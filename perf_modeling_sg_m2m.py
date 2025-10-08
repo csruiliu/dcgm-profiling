@@ -514,16 +514,16 @@ def main():
     target_gpu_arch = args.target_gpu_architect
     flop_util = args.flop_util 
     mem_util = args.mem_util 
-    precision = args.precision
+    tensor_precision = args.tensor_precision
 
     profiled_df = process_file(dcgm_metric_file, metrics)
     print(profiled_df)
-    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, precision)
+    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, start_ts, end_ts, ref_gpu_arch, tensor_precision)
     
     if target_gpu_arch is not None:
         perf_predict(profiled_df, metrics, 
                      overall_runtime_ms, sample_interval_ms, start_ts, end_ts, 
-                     ref_gpu_arch, target_gpu_arch, precision,
+                     ref_gpu_arch, target_gpu_arch, tensor_precision,
                      flop_util, mem_util)
 
 
