@@ -185,6 +185,8 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
     t_flop_list = list()
     t_dram_list = list()
     t_total_roofline_ref_list = list()
+    t_total_otherGPU_ref_list = list()
+    t_total_otherNode_ref_list = list()
 
     ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
 
@@ -207,12 +209,14 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         t_total_roofline_ref_list.append(t_roofline)
 
         t_otherGPU = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline)
+        t_total_otherGPU_ref_list.append(t_otherGPU)
 
         t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (ref_gpu_spec["ref_pcie_bw"] * 1e9) 
 
         t_nvlink = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (ref_gpu_spec["ref_nvlink_bw"] * 1e9)
 
         t_otherNode = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie - t_nvlink)
+        t_total_otherNode_ref_list.append(t_otherNode)
 
         t_total = t_roofline + t_otherGPU + t_pcie + t_nvlink + t_otherNode
 
@@ -226,11 +230,15 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         t_flop_list_finish = t_flop_list[:finish_idx]
         t_dram_list_finish = t_dram_list[:finish_idx]
         t_total_roofline_ref_list_finish = t_total_roofline_ref_list[:finish_idx]
+        t_total_otherGPU_ref_list_finish = t_total_otherGPU_ref_list[:finish_idx]
+        t_total_otherNode_ref_list_finish = t_total_otherNode_ref_list[:finish_idx]
     else:
         t_total_list_finish = t_total_list
         t_flop_list_finish = t_flop_list
         t_dram_list_finish = t_dram_list
         t_total_roofline_ref_list_finish = t_total_roofline_ref_list
+        t_total_otherGPU_ref_list_finish = t_total_otherGPU_ref_list
+        t_total_otherNode_ref_list_finish = t_total_otherNode_ref_list
 
     if start_ts is not None or end_ts is not None:
         start_idx = 0
@@ -247,6 +255,8 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
             t_flop_list_slice = t_flop_list[start_idx:end_idx]
             t_dram_list_slice = t_dram_list[start_idx:end_idx]
             t_total_roofline_ref_list_slice = t_total_roofline_ref_list_finish[start_idx:end_idx]
+            t_total_otherGPU_ref_list_slice = t_total_otherGPU_ref_list_finish[start_idx:end_idx]
+            t_total_otherNode_ref_list_slice = t_total_otherNode_ref_list_finish[start_idx:end_idx]
             
         else:
             t_total_list_slice = []
@@ -256,18 +266,26 @@ def perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, 
         
         flop = np.mean(t_flop_list_slice) / sample_intv * ref_gpu_spec[prec_ref_mappings[precision]]
         dram = np.mean(t_dram_list_slice) / sample_intv * ref_gpu_spec["ref_mem_bw"]
+        print("============ Reference Hardware ============")
         print(f"Estimate TFLOPS on Reference Hardware: {flop:0.2f}")
-        print(f"Estimate Roofline Time On Reference Hardware: {sum(t_total_roofline_ref_list_slice):0.2f}")
         print(f"Estimate GPU Memory Bandwidth on Reference Hardware: {dram:0.2f}")
+        print(f"Estimate Roofline Time On Reference Hardware: {sum(t_total_roofline_ref_list_slice):0.2f}")
+        print(f"Estimate otherGPU Time On Reference Hardware: {sum(t_total_otherGPU_ref_list_slice):0.2f}")
+        print(f"Estimate otherNode Time On Reference Hardware: {sum(t_total_otherNode_ref_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Reference Hardware: {sum(t_total_list_slice):0.2f}")
+        print("\n")
         return 
 
     flop = np.mean(t_flop_list_finish) / sample_intv * ref_gpu_spec[prec_ref_mappings[precision]]
     dram = np.mean(t_dram_list_finish) / sample_intv * ref_gpu_spec["ref_mem_bw"]
+    print("============ Reference Hardware ============")
     print(f"Estimate TFLOPS on Reference Hardware: {flop:0.2f}")
-    print(f"Estimate Roofline Time On Reference Hardware: {sum(t_total_roofline_ref_list_finish):0.2f}")
     print(f"Estimate GPU Memory Bandwidth on Reference Hardware: {dram:0.2f}")
+    print(f"Estimate Roofline Time On Reference Hardware: {sum(t_total_roofline_ref_list_finish):0.2f}")
+    print(f"Estimate otherGPU Time On Reference Hardware: {sum(t_total_otherGPU_ref_list_finish):0.2f}")
+    print(f"Estimate otherNode Time On Reference Hardware: {sum(t_total_otherNode_ref_list_finish):0.2f}")
     print(f"Estimate Overall Runtime On Reference Hardware: {sum(t_total_list_finish):0.2f}")
+    print("\n")
     return
 
 
@@ -303,6 +321,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
     t_total_sequential_target_list = list()
     t_total_switch_target_list = list()
     t_total_roofline_target_list = list()
+    t_total_otherGPU_overlap_target_list = list()
+    t_total_otherGPU_sequential_target_list = list()
+    t_total_otherNode_target_list = list()
+
     drama_ref_list = list()
     tensor_ref_list = list()
     fp64a_ref_list = list()
@@ -378,17 +400,20 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
         t_roofline_target_switch = max(t_flop_target, t_dram_target)
 
         t_otherGPU_target_overlap = t_otherGPU_ref_overlap * (ref_gpu_spec["ref_base_clock"] / target_gpu_spec["target_base_clock"])  * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"])
+        t_total_otherGPU_overlap_target_list.append(t_otherGPU_target_overlap)
 
         t_otherGPU_target_sequential = t_otherGPU_ref_sequential * (ref_gpu_spec["ref_base_clock"] / target_gpu_spec["target_base_clock"])  * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"])
+        t_total_otherGPU_sequential_target_list.append(t_otherGPU_target_sequential)
 
         t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
 
         t_nvlink_target = t_nvlink_ref * (ref_gpu_spec["ref_nvlink_bw"] / target_gpu_spec["target_nvlink_bw"])
 
         t_otherNode_target = t_otherNode_ref
+        t_total_otherNode_target_list.append(t_otherNode_target)
 
         t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target_overlap + t_pcie_target + t_nvlink_target + t_otherNode_target
-
+        
         t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target_sequential + t_pcie_target + t_nvlink_target + t_otherNode_target
 
         t_total_target_switch = t_roofline_target_switch + t_otherGPU_target_overlap + t_pcie_target + t_nvlink_target + t_otherNode_target
@@ -406,6 +431,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
         t_total_sequential_target_list_finish = t_total_sequential_target_list[:finish_idx]
         t_total_switch_target_list_finish = t_total_switch_target_list[:finish_idx]
         t_total_roofline_target_list_finish = t_total_roofline_target_list[:finish_idx]
+        t_total_otherGPU_overlap_target_list_finish = t_total_otherGPU_overlap_target_list[:finish_idx]
+        t_total_otherGPU_sequential_target_list_finish = t_total_otherGPU_sequential_target_list[:finish_idx]
+        t_total_otherNode_target_list_finish = t_total_otherNode_target_list[:finish_idx]
+
         drama_ref_list_finish = drama_ref_list[:finish_idx]
         tensor_ref_list_finish = tensor_ref_list[:finish_idx]
         fp64a_ref_list_finish = fp64a_ref_list[:finish_idx]
@@ -416,6 +445,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
         t_total_sequential_target_list_finish = t_total_sequential_target_list
         t_total_switch_target_list_finish = t_total_switch_target_list
         t_total_roofline_target_list_finish = t_total_roofline_target_list
+        t_total_otherGPU_overlap_target_list_finish = t_total_otherGPU_overlap_target_list
+        t_total_otherGPU_sequential_target_list_finish = t_total_otherGPU_sequential_target_list
+        t_total_otherNode_target_list_finish = t_total_otherNode_target_list
+
         drama_ref_list_finish = drama_ref_list
         tensor_ref_list_finish = tensor_ref_list
         fp64a_ref_list_finish = fp64a_ref_list
@@ -437,6 +470,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
             t_total_sequential_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
             t_total_switch_target_list_slice = t_total_switch_target_list_finish[start_idx:end_idx]
             t_total_roofline_target_list_slice = t_total_roofline_target_list_finish[start_idx:end_idx]
+            t_total_otherGPU_overlap_target_list_slice = t_total_otherGPU_overlap_target_list_finish[start_idx:end_idx]
+            t_total_otherGPU_sequential_target_list_slice = t_total_otherGPU_sequential_target_list_finish[start_idx:end_idx]
+            t_total_otherNode_target_list_slice = t_total_otherNode_target_list_finish[start_idx:end_idx]
+            
             drama_ref_list_slice = drama_ref_list_finish[start_idx:end_idx]
             tensor_ref_list_slice = tensor_ref_list_finish[start_idx:end_idx]
             fp64a_ref_list_slice = fp64a_ref_list_finish[start_idx:end_idx]
@@ -447,6 +484,10 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
             t_total_sequential_target_list_slice = []
             t_total_switch_target_list_slice = []
             t_total_roofline_target_list_slice = []
+            t_total_otherGPU_overlap_target_list_slice = []
+            t_total_otherGPU_sequential_target_list_slice = []
+            t_total_otherNode_target_list_slice = []
+
             drama_ref_list_slice = []
             tensor_ref_list_slice = []
             fp64a_ref_list_slice = []
@@ -460,9 +501,14 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
                      np.mean(fp32a_ref_list_slice) * target_gpu_spec["target_fp32"] +
                      np.mean(fp16a_ref_list_slice) * target_gpu_spec["target_fp16"])
         
+        print("============ Target Hardware ============")
         print(f"Estimate FLOPS On Target Hardware: {est_flops:0.2f}")
         print(f"Estimate Memory BandWidth On Target Hardware: {est_mem_bw:0.2f}")
+        
         print(f"Estimate Roofline Time On Target Hardware: {sum(t_total_roofline_target_list_slice):0.2f}")
+        print(f"Estimate otherGPU Time On Target Hardware [Overlap Scenario]: {sum(t_total_otherGPU_overlap_target_list_slice):0.2f}")
+        print(f"Estimate otherGPU Time On Target Hardware [Sequential Scenario]: {sum(t_total_otherGPU_sequential_target_list_slice):0.2f}")
+        print(f"Estimate otherNode Time On Target Hardware: {sum(t_total_otherNode_target_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_slice):0.2f}")
         print(f"Estimate Runtime of Analysis Window On Target Hardware [Sequential Scenario]: {sum(t_total_sequential_target_list_slice):0.2f}")
         #print(f"Estimate Runtime of Analysis Window On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_slice):0.2f}")
@@ -473,9 +519,15 @@ def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, s
                  np.mean(fp64a_ref_list_finish) * target_gpu_spec["target_fp64"] + 
                  np.mean(fp32a_ref_list_finish) * target_gpu_spec["target_fp32"] +
                  np.mean(fp16a_ref_list_finish) * target_gpu_spec["target_fp16"])
+    
+    print("============ Target Hardware ============")
     print(f"Estimate FLOPS On Target Hardware: {est_flops:0.2f}")
     print(f"Estimate Memory BandWidth On Target Hardware: {est_mem_bw:0.2f}")
+
     print(f"Estimate Roofline Time On Target Hardware: {sum(t_total_roofline_target_list_finish):0.2f}")
+    print(f"Estimate otherGPU Time On Target Hardware [Overlap Scenario]: {sum(t_total_otherGPU_overlap_target_list_finish):0.2f}")
+    print(f"Estimate otherGPU Time On Target Hardware [Sequential Scenario]: {sum(t_total_otherGPU_sequential_target_list_finish):0.2f}")
+    print(f"Estimate otherNode Time On Target Hardware: {sum(t_total_otherNode_target_list_finish):0.2f}")
     print(f"Estimate Runtime On Target Hardware [Overlap Scenario]: {sum(t_total_overlap_target_list_finish):0.2f}")
     print(f"Estimate Runtime On Target Hardware [Sequential Scenario]: {sum(t_total_sequential_target_list_finish):0.2f}")
     #print(f"Estimate Runtime On Target Hardware [Switch Scenario]: {sum(t_total_switch_target_list_finish):0.2f}")
