@@ -1,12 +1,16 @@
 import pandas as pd
 import numpy as np
 import os
+import ast
 from pathlib import Path
+from collections import Counter
 import argparse
 import json
 import glob
 from dataclasses import dataclass, replace
 import matplotlib.pyplot as plt
+from concurrent.futures import ProcessPoolExecutor
+from more_itertools import chunked
 
 from pm_node_config import nodes_80gb_set
 
@@ -56,7 +60,14 @@ def read_ldmsdata_pq(f):
     return data
 
 
-def init_devices():
+def check_device_support(ref_gpu, tgt_gpu_list):
+    if ref_gpu in ["A100-40", "A100-80", "H100"]:
+        print(f"Reference GPU {ref_gpu} is supported")
+    if set(tgt_gpu_list).issubset(["A100-40", "A100-80", "H100", "M_H14_base", "M_H14_base", "R100", "R100_UNI"]):
+        print(f"Target GPUs {tgt_gpu_list} are supported")
+
+
+def init_devices(ref_gpu_str, tgt_gpu_str_list):
     A100_40G = Device(name="A100-40G", 
                       fp16=78.0, fp32=19.5, fp64=9.7, tf16=312.0, tf32=156.0, tf64=19.5, 
                       membw=1.555, pcie=64.0*1e9, nvlink=600*1e9, 
@@ -72,12 +83,12 @@ def init_devices():
                   membw=3.350, pcie=128.0*1e9, nvlink=900.0*1e9, 
                   alpha_gpu=4.0, alpha_cpu=3.0)
     
-    M_H14_base = Device(name="M_H14_base", 
+    M_H14_base = Device(name="M-H14-base", 
                         fp16=H100.fp16, fp32=H100.fp32, fp64=H100.fp64, tf16=H100.tf16, tf32=H100.tf32, tf64=H100.tf64, 
                         membw=H100.membw*4.0, pcie=H100.pcie*4.0,  nvlink=H100.nvlink*4.0,
                         alpha_gpu=1.0, alpha_cpu=1.0)
 
-    F_H14_base = Device(name="F_H14_base",
+    F_H14_base = Device(name="F-H14-base",
                         fp16=H100.fp16*4.0, fp32=H100.fp32*4.0, fp64=H100.fp64*4.0, tf16=H100.tf16*4.0, tf32=H100.tf32*4.0, tf64=H100.tf64*4.0, 
                         membw=H100.membw*1.0, pcie=H100.pcie*4.0,  nvlink=H100.nvlink*4.0,
                         alpha_gpu=1.0, alpha_cpu=1.0)
@@ -93,6 +104,33 @@ def init_devices():
     cpu_sweep_M = [replace(M_H14_base, alpha_cpu=ac) for ac in alpha_cpu_vals]
     cpu_sweep_F = [replace(F_H14_base, alpha_cpu=ac) for ac in alpha_cpu_vals]
     cpu_sweep = cpu_sweep_M + cpu_sweep_F
+
+    # Create a dictionary mapping device names to Device objects
+    device_map = {
+        "A100-40G": A100_40G,
+        "A100-40": A100_40G,  # Alias
+        "A100-80G": A100_80G,
+        "A100-80": A100_80G,  # Alias
+        "H100": H100,
+        "M-H14-base": M_H14_base,
+        "M_H14_base": M_H14_base,  # Alias
+        "F-H14-base": F_H14_base,
+        "F_H14_base": F_H14_base,  # Alias
+    }
+
+    # Get reference GPU
+    if ref_gpu_str not in device_map:
+        raise ValueError(f"Reference GPU '{ref_gpu_str}' not found. Available devices: {list(device_map.keys())}")
+    ref_gpu = device_map[ref_gpu_str]
+
+    # Get target GPU list
+    tgt_gpu_list = []
+    for tgt_gpu_str in tgt_gpu_str_list:
+        if tgt_gpu_str not in device_map:
+            raise ValueError(f"Target GPU '{tgt_gpu_str}' not found. Available devices: {list(device_map.keys())}")
+        tgt_gpu_list.append(device_map[tgt_gpu_str])
+
+    return ref_gpu, tgt_gpu_list
 
 
 def get_scale_factors(ref_gpu: Device, tgt_gpu: Device):
@@ -111,7 +149,25 @@ def get_scale_factors(ref_gpu: Device, tgt_gpu: Device):
         }
 
 
-def preprocess_df(df):
+def process_job_metadata(jobs_metadata_csv):
+    job_metadata_df = pd.read_csv(jobs_metadata_csv)
+    job_metadata_qos_filtered_df = job_metadata_df[job_metadata_df["QOS"].isin(["gpu_premium","gpu_regular"])]
+    # Build a set of allowed (JobID, User) pairs
+    mask = job_metadata_df['nodes'].apply(lambda x: ast.literal_eval(x)[0] not in nodes_80gb_set)
+    
+    # get non-interactive jobs using a100-40gb
+    non_interactive_jobs_40gb = set(
+        job_metadata_df.loc[
+            (job_metadata_df['QOS'].isin(["gpu_regular", "gpu_premium"])) & mask,
+            ['JobID', 'User']
+        ].itertuples(index=False, name=None)
+    )
+    print(f"The number of non-interactive jobs using A100-40GB: {len(non_interactive_jobs_40gb)}")
+    
+    return non_interactive_jobs_40gb
+    
+
+def preprocess_job_data(df):
     df.rename( 
         columns={
             'nersc_ldms_dcgm_gr_engine_active':'GRACT',
@@ -153,8 +209,8 @@ def preprocess_df(df):
     return filtered_df
 
 
-def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, tgt_gpu_list: list, sampling_intv, mad=False):
-    df = preprocess_df(df)
+def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, tgt_gpu_list: list):
+    df = preprocess_job_data(df)
     
     # if all time is in otherNode, then this is a spurious sample. Drop all these rows.
     df=df[df['t_otherNode']!=1.0]
@@ -224,7 +280,7 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
         frac_otherNode_roofline_sequential_ref = -1
         frac_otherGPU_roofline_sequential_ref = -1
 
-    summary_dicts_list = list()
+    time_distribution_per_job = list()
     for tgt_gpu in tgt_gpu_list:
         scales = get_scale_factors(ref_gpu, tgt_gpu)
     
@@ -275,7 +331,8 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
         else:
             speedup_roofline_sequential_independent = 0
 
-        time_distributions = {
+        # each target gpu will generate a time ditribution dict
+        time_distribution_per_tgt_gpu = {
             'total_measured_runtime':job_total_runtime,
             'total_node_hours_job':job_node_hours,
             f'frac_otherNode_roofline_overlap_{ref_gpu.name}': frac_otherNode_roofline_overlap_ref,
@@ -289,13 +346,33 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
             f'speedup_roofline_overlap_independent_{tgt_gpu.name}_{tgt_gpu.alpha_gpu}_{tgt_gpu.alpha_cpu}': speedup_roofline_overlap_independent,
             f'speedup_roofline_sequential_independent_{tgt_gpu.name}_{tgt_gpu.alpha_gpu}_{tgt_gpu.alpha_cpu}': speedup_roofline_sequential_independent,
         }
-        summary_dicts_list.append(time_distributions)
-    combined = {}
+        time_distribution_per_job.append(time_distribution_per_tgt_gpu)
 
-    for d in summary_dicts_list:
-        combined.update(d)
+    return time_distribution_per_job
+
+
+def process_jobs(file_chunks, chunk_idx, job_data_path, non_interactive_jobs_40gb, ref_gpu, tgt_gpu_list):
+    """Worker function to process a subset of parquet files"""
+    print(f"File Chunk {chunk_idx} is being processed")
     
-    return combined
+    local_summaries = dict()
+
+    for pq_file in file_chunks:
+        jobid, userid = Path(pq_file).stem.rsplit('_', 1)
+        if (jobid, userid) not in non_interactive_jobs_40gb:
+            continue
+        
+        jobid_userid = jobid + "_" + userid
+        metadata_file = job_data_path + "/" + jobid_userid + ".json"
+        metadata = read_metadata_file_json(metadata_file)
+
+        pq_df = pd.read_parquet(pq_file, engine='pyarrow')
+
+        time_distribution_per_job = model_time_per_job(pq_df, get_runtime_job(metadata), ref_gpu, tgt_gpu_list)
+
+        local_summaries[jobid_userid] = time_distribution_per_job
+
+    return local_summaries
 
 
 def main():
@@ -303,46 +380,73 @@ def main():
     # get all parameters
     ###################################
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('-s', '--sample_interval_second', action='store', type=int, default=10, required=True,
-                        help='indicate the sample interval in milliseconds')
-    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
-                        choices=['A100-40', 'A100-80'], help='indicate the reference gpu architecture')
-    parser.add_argument('-tgs', '--target_gpu_architect_list', action='store', type=list_of_strings, default=None, 
-                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI'], 
+    parser.add_argument('-rg', '--ref_gpu', action='store', type=str, required=True, 
+                        help='indicate the reference gpu architecture')
+    parser.add_argument('-tgs', '--target_gpu_list', action='store', type=list_of_strings, required=True, 
                         help='indicate the target gpu architecture')
-    parser.add_argument('--job_master_file', action='store', type=str, required=True, help='indicate the job master file')
-    parser.add_argument('--job_paths', type=list_of_strings, required=True, help='indicate the list of job_paths')    
+    parser.add_argument('--job_master_file', action='store', type=str, required=True, 
+                        help='indicate the job master file')
+    parser.add_argument('--job_path', action='store', type=str, required=True, 
+                        help='indicate the job path that consists of various jobs')
+    parser.add_argument('--max_workers', action='store', type=int, default=None,
+                        help='maximum number of worker processes (defaults to CPU count)')    
     args = parser.parse_args()
 
-    sampling_intv = args.overall_runtime_second
-    ref_gpu_arch = args.ref_gpu_architect
-    tgt_gpu_arch = args.target_gpu_architect
-    jobwise_data_paths = args.job_paths
+    sampling_intv = args.sample_interval_second
+    ref_gpu_str = args.ref_gpu
+    tgt_gpu_str_list = args.target_gpu_list
     job_master_file = args.job_master_file
+    job_data_path = args.job_path
+    max_workers = args.max_workers
 
-    for path in jobwise_data_paths:
-        pattern = os.path.join(path, "*.pq")
-        pq_file_list = glob.glob(pattern)
-        print(f"{path} has {len(pq_file_list)} parquet files")
+    print("==============================")
+    print(f"Sampling Interval: {sampling_intv}s")
+    print(f"Reference GPU: {ref_gpu_str}")
+    print(f"Target GPU List: {tgt_gpu_str_list}")
+    print(f"Job Data: {job_data_path}")
+    print(f"Job Metadata File: {job_master_file}")
 
-        for pq_file in pq_file_list:
-            jobid, userid = Path(pq_file).stem.rsplit('_', 1)
-            jobid_userid = jobid + "_" + userid
-            metadatafile = path + "/" + jobid_userid + ".json"
+    check_device_support(ref_gpu_str, tgt_gpu_str_list)
 
-            metadata = read_metadata_file_json(metadatafile)
+    ref_gpu_device, tgt_gpu_device_list = init_devices(ref_gpu_str, tgt_gpu_str_list)
 
-            pq_df = pd.read_parquet(pq_file, engine='pyarrow')
-
-            time_distributions = model_time_per_job(pq_df, get_runtime_job(metadata), ref_gpu_arch, tgt_gpu_arch, sampling_intv)
-
-            summaries[jobid_userid]=time_distributions
-
-
-    init_devices()
+    non_interactive_jobs_40gb = process_job_metadata(job_master_file)
     
-    jobs_master_df=pd.read_csv(job_master_file)
+    # Get list of parquet files
+    pattern = os.path.join(job_data_path, "*.pq")
+    pq_file_list = glob.glob(pattern)
+    print(f"{job_data_path} has {len(pq_file_list)} parquet files")
 
+    # Split files into chunks for parallel processing
+    num_workers = max_workers if max_workers else os.cpu_count() - 1
+    chunk_size = max(1, len(pq_file_list) // num_workers)
+    file_chunks = [pq_file_list[i:i + chunk_size] for i in range(0, len(pq_file_list), chunk_size)]
+    
+    print(f"Processing with {len(file_chunks)} workers, each has {chunk_size} files")
+    
+    summaries = dict()
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = [
+            executor.submit(
+                process_jobs, 
+                chunk, 
+                chunk_idx, 
+                job_data_path, 
+                non_interactive_jobs_40gb, 
+                ref_gpu_device, 
+                tgt_gpu_device_list, 
+                sampling_intv
+            )
+            for chunk_idx, chunk in enumerate(file_chunks)
+        ]
+
+        # Collect results from all processes
+        for future in futures:
+            result = future.result()
+            summaries.update(result)
+
+    print(f"Processed {len(summaries)} jobs in total")
+    
 
 if __name__=="__main__":
     main()
