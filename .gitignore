@@ -6,6 +6,7 @@
 **/results
 **/figures
 **/pm_data
+**/__pycache__
 
 # Prerequisites
 *.d
