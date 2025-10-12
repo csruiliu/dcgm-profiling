@@ -7,6 +7,7 @@ from collections import Counter
 import argparse
 import json
 import glob
+import time
 from dataclasses import dataclass, replace
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -388,7 +389,7 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
 
 def process_jobs(file_chunks, chunk_idx, non_interactive_jobs_40gb, ref_gpu, tgt_gpu_list):
     """Worker function to process a subset of parquet files"""
-    print(f"Worker {chunk_idx} is processing")
+    # print(f"Chunk {chunk_idx} is being process")
     
     local_summaries = dict()
 
@@ -407,7 +408,7 @@ def process_jobs(file_chunks, chunk_idx, non_interactive_jobs_40gb, ref_gpu, tgt
 
         local_summaries[jobid_userid] = time_distribution_per_job
 
-    print(f"Worker {chunk_idx} finishes processing")
+    # print(f"Chunk {chunk_idx} has been processed")
     return local_summaries
 
 
@@ -458,15 +459,14 @@ def main():
         return
 
     # Split files into chunks for parallel processing
-    # chunk_size = max(1, len(pq_file_list) // max_workers)
     file_chunks = [pq_file_list[i:i + chunk_size] for i in range(0, len(pq_file_list), chunk_size)]
-    
-    print(f"Processing with {len(max_workers)} workers, each has {chunk_size} files")
+    print(f"Processing with {max_workers} workers, each has {chunk_size} files")
 
+    timer_start = time.perf_counter()
     # Sequential Processing   
     # process_jobs(pq_file_list, 1, non_interactive_jobs_40gb, ref_gpu_device, tgt_gpu_device_list)
     
-    global_output_list = list()
+    global_output = dict()
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
@@ -484,8 +484,8 @@ def main():
         for chunk_idx, future in enumerate(as_completed(futures)):
             try:
                 result = future.result()
-                global_output_list.append(result)
-                print(f"✓ Completed chunk {chunk_idx}/{len(futures)} with {len(result)} jobs")
+                global_output.update(result)
+                # print(f"✓ Completed chunk {chunk_idx}/{len(futures)} with {len(result)} jobs")
             except Exception as exc:
                 print(f"✗ Chunk {chunk_idx} generated an exception:")
                 print(f"  Exception type: {type(exc).__name__}")
@@ -493,8 +493,30 @@ def main():
                 print(f"  Full traceback:")
                 traceback.print_exc()
         
-    print(f"Processed {len(global_output_list)} jobs in total")
-    
+    print(f"Processed {len(global_output)} jobs in total")
+
+    timer_end = time.perf_counter()
+    print(f"The process took {timer_end - timer_start:.6f} seconds")
+
+    # Convert nested dictionary structure to flat rows for DataFrame
+    rows = []
+    for jobid_userid, time_distributions_per_job in global_output.items():
+        # time_distributions is a list of dicts (one per target GPU)
+        for time_distribution_tgt in time_distributions_per_job:
+            # Create a row with jobid_userid + all metrics from td_dict
+            row = {'jobid_userid': jobid_userid}
+            row.update(time_distribution_tgt)  # Add all the speedup/fraction columns
+            rows.append(row)
+
+    # Create DataFrame and save
+    final_df = pd.DataFrame(rows)
+    final_df.to_parquet('jobwise_dcgm_hmma_may_2025.parquet', index=False)
+    print(f"Wrote {len(final_df)} rows to jobwise_dcgm_hmma_may_2025.parquet")
+
+    df = pd.read_parquet('jobwise_dcgm_hmma_may_2025.parquet')
+    print(df)
+
+
 
 if __name__=="__main__":
     main()
