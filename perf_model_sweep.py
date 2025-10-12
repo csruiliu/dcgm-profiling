@@ -9,8 +9,8 @@ import json
 import glob
 from dataclasses import dataclass, replace
 import matplotlib.pyplot as plt
-from concurrent.futures import ProcessPoolExecutor
-from more_itertools import chunked
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import traceback
 
 from pm_node_config import nodes_80gb_set
 
@@ -55,9 +55,19 @@ def get_runtime_job(metadata):
     return runtime // 1000
 
 
-def read_ldmsdata_pq(f):
-    data=pd.read_parquet(f,engine='pyarrow')
-    return data
+def get_all_parquet_files(job_data_path):
+    """Recursively find all parquet files in job_data_path and its subdirectories"""
+    pq_file_list = []
+    
+    # Method 1: Using pathlib (recommended)
+    job_path = Path(job_data_path)
+    pq_file_list = [str(f) for f in job_path.rglob("*.pq")]
+    
+    # Method 2: Using glob with recursive pattern (alternative)
+    # pattern = os.path.join(job_data_path, "**", "*.pq")
+    # pq_file_list = glob.glob(pattern, recursive=True)
+    
+    return pq_file_list
 
 
 def check_device_support(ref_gpu, tgt_gpu_list):
@@ -167,7 +177,8 @@ def process_job_metadata(jobs_metadata_csv):
     return non_interactive_jobs_40gb
     
 
-def preprocess_job_data(df):
+def preprocess_job_data(df, ref_gpu):
+    tensa_index_threshold = 0.02
     df.rename( 
         columns={
             'nersc_ldms_dcgm_gr_engine_active':'GRACT',
@@ -201,7 +212,13 @@ def preprocess_job_data(df):
             (df['TENSA_HMMA'] <= df['TENSA'])
         ].copy()
     
-    filtered_df['TENSA'] = np.where(filtered_df['TENSA_HMMA'] <= 0.1, filtered_df['TENSA'] - filtered_df['TENSA_HMMA'], filtered_df['TENSA'])
+    filtered_df['TENSA_hp'] = np.where(filtered_df['TENSA_HMMA'] > tensa_index_threshold, filtered_df['TENSA_HMMA'], 0)
+    filtered_df['TENSA_non_hp'] = np.maximum(0,filtered_df['TENSA'] - filtered_df['TENSA_HMMA'])
+
+    ts = (ref_gpu.fp64 / ref_gpu.fp32) * (ref_gpu.tf32 / ref_gpu.tf64)
+    filtered_df['TENSA_sp'] = np.where((filtered_df['FP64A'] > 0.0) | (filtered_df['FP32A'] > 0.0), filtered_df['TENSA_non_hp'] * filtered_df['FP32A'] / (ts*filtered_df['FP64A'] + filtered_df['FP32A']), 0)
+    filtered_df['TENSA_dp'] = filtered_df['TENSA_non_hp'] - filtered_df['TENSA_sp']
+   
     filtered_df['PCRXTX'] = filtered_df['PCRX'] + filtered_df['PCTX']
     filtered_df['NVRXTX'] = filtered_df['NVRX'] + filtered_df['NVTX']
     filtered_df['RXTX'] = filtered_df['NVRXTX'] + filtered_df['PCRXTX']
@@ -210,23 +227,23 @@ def preprocess_job_data(df):
 
 
 def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, tgt_gpu_list: list):
-    df = preprocess_job_data(df)
+    df = preprocess_job_data(df, ref_gpu)
     
-    # if all time is in otherNode, then this is a spurious sample. Drop all these rows.
-    df=df[df['t_otherNode']!=1.0]
-
     '''
         Modeling Performance on Reference Hardwre
     '''
     
     df['FLOPS_ref'] = df['FP64A'] + df['FP32A'] + df['FP16A'] + df['TENSA_hp'] + df['TENSA_sp'] + df['TENSA_dp']
-    df["t_roofline_overlap_ref"] = np.maximum(df['FLOPS_ref'], df['DRAMA'])
-    df["t_roofline_sequential_ref"] = np.minimum(1.0, df['FLOPS_ref'] + df['DRAMA'])
-    df["t_otherGPU_overlap_ref"] = np.maximum(0, df['GRACT'] - df['t_roofline_overlap_ref'])
-    df["t_otherGPU_sequential_ref"] = np.maximum(0, df["GRACT"] - df["t_roofline_sequential_ref"])
-    df["t_PCIE_ref"] = df["PCRXTX"] / ref_gpu.pcie
-    df["t_NVLINK_ref"] = df["NVRXTX"] / ref_gpu.nvlink
+    df['t_roofline_overlap_ref'] = np.maximum(df['FLOPS_ref'], df['DRAMA'])
+    df['t_roofline_sequential_ref'] = np.minimum(1.0, df['FLOPS_ref'] + df['DRAMA'])
+    df['t_otherGPU_overlap_ref'] = np.maximum(0, df['GRACT'] - df['t_roofline_overlap_ref'])
+    df['t_otherGPU_sequential_ref'] = np.maximum(0, df['GRACT'] - df['t_roofline_sequential_ref'])
+    df['t_PCIE_ref'] = df['PCRXTX'] / ref_gpu.pcie
+    df['t_NVLINK_ref'] = df['NVRXTX'] / ref_gpu.nvlink
     df['t_otherNode_ref'] = np.maximum(0, 1 - df['GRACT'] - df['t_PCIE_ref'] - df['t_NVLINK_ref'])
+
+    # if all time is in otherNode, then this is a spurious sample. Drop all these rows.
+    df=df[df['t_otherNode_ref']!=1.0]
 
     df['t_sample_roofline_overlap_ref'] = df[['t_roofline_overlap_ref',
                                               't_otherGPU_overlap_ref',
@@ -303,6 +320,24 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
         df['t_roofline_sequential_tgt'] = np.minimum(1.0, df['FLOPS_tgt'] + df['DRAMA_tgt']) 
         df['t_otherGPU_sequential_tgt'] = df['t_otherGPU_sequential_ref'] * scales['alpha_gpu']
 
+        df['t_PCIE_tgt'] = df['t_PCIE_ref'] * scales['pcie']
+        df['t_NVLINK_tgt'] = df['t_NVLINK_ref'] * scales['nvlink']
+
+        df['t_otherNode_tgt']=df['t_otherNode_ref'] * scales['alpha_cpu'] 
+
+        #sample time on target
+        df['t_sample_roofline_overlap_tgt'] = df[['t_roofline_overlap_tgt',
+                                                  't_otherGPU_overlap_tgt',
+                                                  't_PCIE_tgt',
+                                                  't_NVLINK_tgt',
+                                                  't_otherNode_tgt']].sum(axis=1)
+                                                  
+        df['t_sample_roofline_sequential_tgt'] = df[['t_roofline_sequential_tgt',
+                                                     't_otherGPU_sequential_tgt',
+                                                     't_PCIE_tgt',
+                                                     't_NVLINK_tgt',
+                                                     't_otherNode_tgt']].sum(axis=1)
+
         roofline_cols_tgt = ['t_sample_roofline_overlap_tgt', 't_sample_roofline_sequential_tgt']
         df_synced_tgt = df.groupby('timestamp_10s')[roofline_cols_tgt].max().reset_index()
 
@@ -351,9 +386,9 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
     return time_distribution_per_job
 
 
-def process_jobs(file_chunks, chunk_idx, job_data_path, non_interactive_jobs_40gb, ref_gpu, tgt_gpu_list):
+def process_jobs(file_chunks, chunk_idx, non_interactive_jobs_40gb, ref_gpu, tgt_gpu_list):
     """Worker function to process a subset of parquet files"""
-    print(f"File Chunk {chunk_idx} is being processed")
+    print(f"Worker {chunk_idx} is processing")
     
     local_summaries = dict()
 
@@ -363,15 +398,16 @@ def process_jobs(file_chunks, chunk_idx, job_data_path, non_interactive_jobs_40g
             continue
         
         jobid_userid = jobid + "_" + userid
-        metadata_file = job_data_path + "/" + jobid_userid + ".json"
+        metadata_file = pq_file.replace(".pq", ".json")
         metadata = read_metadata_file_json(metadata_file)
 
         pq_df = pd.read_parquet(pq_file, engine='pyarrow')
 
-        time_distribution_per_job = model_time_per_job(pq_df, get_runtime_job(metadata), ref_gpu, tgt_gpu_list)
+        time_distribution_per_job = model_time_per_job(pq_df, get_runtime_job(metadata), get_node_hours_job(metadata), ref_gpu, tgt_gpu_list)
 
         local_summaries[jobid_userid] = time_distribution_per_job
 
+    print(f"Worker {chunk_idx} finishes processing")
     return local_summaries
 
 
@@ -388,19 +424,20 @@ def main():
                         help='indicate the job master file')
     parser.add_argument('--job_path', action='store', type=str, required=True, 
                         help='indicate the job path that consists of various jobs')
-    parser.add_argument('--max_workers', action='store', type=int, default=None,
+    parser.add_argument('--max_workers', action='store', type=int, default=32,
                         help='maximum number of worker processes (defaults to CPU count)')    
+    parser.add_argument('--chunk_size', action='store', type=int, default=1,
+                        help='the number of chunks that each worker processes, 1 is maximum parallelism, large size has less overhead')
     args = parser.parse_args()
 
-    sampling_intv = args.sample_interval_second
     ref_gpu_str = args.ref_gpu
     tgt_gpu_str_list = args.target_gpu_list
     job_master_file = args.job_master_file
     job_data_path = args.job_path
     max_workers = args.max_workers
+    chunk_size = args.chunk_size
 
     print("==============================")
-    print(f"Sampling Interval: {sampling_intv}s")
     print(f"Reference GPU: {ref_gpu_str}")
     print(f"Target GPU List: {tgt_gpu_str_list}")
     print(f"Job Data: {job_data_path}")
@@ -412,40 +449,51 @@ def main():
 
     non_interactive_jobs_40gb = process_job_metadata(job_master_file)
     
-    # Get list of parquet files
-    pattern = os.path.join(job_data_path, "*.pq")
-    pq_file_list = glob.glob(pattern)
-    print(f"{job_data_path} has {len(pq_file_list)} parquet files")
+    # Get list of parquet files recursively from job_data_path and subdirectories
+    pq_file_list = get_all_parquet_files(job_data_path)
+    print(f"{job_data_path} has {len(pq_file_list)} parquet files (including subdirectories)")
+    
+    if len(pq_file_list) == 0:
+        print("No parquet files found. Exiting...")
+        return
 
     # Split files into chunks for parallel processing
-    num_workers = max_workers if max_workers else os.cpu_count() - 1
-    chunk_size = max(1, len(pq_file_list) // num_workers)
+    # chunk_size = max(1, len(pq_file_list) // max_workers)
     file_chunks = [pq_file_list[i:i + chunk_size] for i in range(0, len(pq_file_list), chunk_size)]
     
-    print(f"Processing with {len(file_chunks)} workers, each has {chunk_size} files")
+    print(f"Processing with {len(max_workers)} workers, each has {chunk_size} files")
+
+    # Sequential Processing   
+    # process_jobs(pq_file_list, 1, non_interactive_jobs_40gb, ref_gpu_device, tgt_gpu_device_list)
     
-    summaries = dict()
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+    global_output_list = list()
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
                 process_jobs, 
                 chunk, 
                 chunk_idx, 
-                job_data_path, 
                 non_interactive_jobs_40gb, 
                 ref_gpu_device, 
-                tgt_gpu_device_list, 
-                sampling_intv
+                tgt_gpu_device_list
             )
             for chunk_idx, chunk in enumerate(file_chunks)
         ]
 
         # Collect results from all processes
-        for future in futures:
-            result = future.result()
-            summaries.update(result)
-
-    print(f"Processed {len(summaries)} jobs in total")
+        for chunk_idx, future in enumerate(as_completed(futures)):
+            try:
+                result = future.result()
+                global_output_list.append(result)
+                print(f"✓ Completed chunk {chunk_idx}/{len(futures)} with {len(result)} jobs")
+            except Exception as exc:
+                print(f"✗ Chunk {chunk_idx} generated an exception:")
+                print(f"  Exception type: {type(exc).__name__}")
+                print(f"  Exception message: {exc}")
+                print(f"  Full traceback:")
+                traceback.print_exc()
+        
+    print(f"Processed {len(global_output_list)} jobs in total")
     
 
 if __name__=="__main__":
