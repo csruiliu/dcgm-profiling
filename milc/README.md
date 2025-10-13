@@ -22,7 +22,7 @@ mkdir build
 cd build
 cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_CXX_COMPILER=$(which nvc++) -DCMAKE_C_COMPILER=$(which nvcc) -DCMAKE_CUDA_COMPILER=$(which nvcc) -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" -DCMAKE_SKIP_RPATH=TRUE -DQUDA_GPU_ARCH=sm_90 -DQUDA_DIRAC_DEFAULT_OFF=ON -DQUDA_DIRAC_STAGGERED=ON -DQUDA_FORCE_HISQ=ON -DQUDA_FORCE_GAUGE=ON -DCMAKE_INSTALL_PREFIX="/global/home/users/rliu5/dcgm-profiling/milc/quda_install" ..
 cmake --build . -j
-cmake --build . -j install
+cmake --build . -- install
 ```
 
 ### 2. Compile and install MILC_QCD 
