@@ -227,7 +227,7 @@ def preprocess_job_data(df, ref_gpu):
     return filtered_df
 
 
-def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, tgt_gpu_list: list):
+def model_time_per_job(df, jobid_userid, job_total_runtime, job_node_hours, ref_gpu: Device, tgt_gpu_list: list):
     df = preprocess_job_data(df, ref_gpu)
     
     '''
@@ -298,7 +298,7 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
         frac_otherNode_roofline_sequential_ref = -1
         frac_otherGPU_roofline_sequential_ref = -1
 
-    time_distribution_per_job = list()
+    time_distribution_per_job = dict()
     for tgt_gpu in tgt_gpu_list:
         scales = get_scale_factors(ref_gpu, tgt_gpu)
     
@@ -368,7 +368,8 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
             speedup_roofline_sequential_independent = 0
 
         # each target gpu will generate a time ditribution dict
-        time_distribution_per_tgt_gpu = {
+        job_time_distribution_tgt_gpu = {
+            'jobid_userid': jobid_userid, 
             'total_measured_runtime':job_total_runtime,
             'total_node_hours_job':job_node_hours,
             f'frac_otherNode_roofline_overlap_{ref_gpu.name}': frac_otherNode_roofline_overlap_ref,
@@ -377,12 +378,13 @@ def model_time_per_job(df, job_total_runtime, job_node_hours, ref_gpu: Device, t
             f'frac_otherGPU_sequential_gract_{ref_gpu.name}':frac_otherGPU_sequential_gract_ref,
             f'frac_otherGPU_roofline_overlap_{ref_gpu.name}': frac_otherGPU_roofline_overlap_ref,
             f'frac_otherGPU_roofline_sequential_{ref_gpu.name}': frac_otherGPU_roofline_sequential_ref,
+            'tgt_gpu': tgt_gpu.name,
             f'speedup_roofline_overlap_sync_{tgt_gpu.name}_{tgt_gpu.alpha_gpu}_{tgt_gpu.alpha_cpu}':speedup_roofline_overlap_sync,
             f'speedup_roofline_sequential_sync_{tgt_gpu.name}_{tgt_gpu.alpha_gpu}_{tgt_gpu.alpha_cpu}':speedup_roofline_sequential_sync,
             f'speedup_roofline_overlap_independent_{tgt_gpu.name}_{tgt_gpu.alpha_gpu}_{tgt_gpu.alpha_cpu}': speedup_roofline_overlap_independent,
             f'speedup_roofline_sequential_independent_{tgt_gpu.name}_{tgt_gpu.alpha_gpu}_{tgt_gpu.alpha_cpu}': speedup_roofline_sequential_independent,
         }
-        time_distribution_per_job.append(time_distribution_per_tgt_gpu)
+        time_distribution_per_job[tgt_gpu.name] = job_time_distribution_tgt_gpu
 
     return time_distribution_per_job
 
@@ -404,7 +406,7 @@ def process_jobs(file_chunks, chunk_idx, non_interactive_jobs_40gb, ref_gpu, tgt
 
         pq_df = pd.read_parquet(pq_file, engine='pyarrow')
 
-        time_distribution_per_job = model_time_per_job(pq_df, get_runtime_job(metadata), get_node_hours_job(metadata), ref_gpu, tgt_gpu_list)
+        time_distribution_per_job = model_time_per_job(pq_df, jobid_userid, get_runtime_job(metadata), get_node_hours_job(metadata), ref_gpu, tgt_gpu_list)
 
         local_summaries[jobid_userid] = time_distribution_per_job
 
@@ -466,7 +468,9 @@ def main():
     # Sequential Processing   
     # process_jobs(pq_file_list, 1, non_interactive_jobs_40gb, ref_gpu_device, tgt_gpu_device_list)
     
-    global_output = dict()
+    # Initialize global output organized by target GPU, each key is with an empty dict 
+    global_output_by_tgt = {f'{tgt.name}': {} 
+                            for tgt in tgt_gpu_device_list}
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
@@ -481,41 +485,37 @@ def main():
         ]
 
         # Collect results from all processes
-        for chunk_idx, future in enumerate(as_completed(futures)):
+        for chunk_idx, future in enumerate(futures):
             try:
                 result = future.result()
-                global_output.update(result)
-                # print(f"✓ Completed chunk {chunk_idx}/{len(futures)} with {len(result)} jobs")
-            except Exception as exc:
-                print(f"✗ Chunk {chunk_idx} generated an exception:")
-                print(f"  Exception type: {type(exc).__name__}")
-                print(f"  Exception message: {exc}")
-                print(f"  Full traceback:")
+                # Merge results for each target GPU
+                for jobid_userid, time_distribution_per_job in result.items():
+                    for tgt_gpu_name, tgt_gpu_time_distribution in time_distribution_per_job.items():
+                        # Find matching device to get alpha values for the key
+                        matching_device = next((d for d in tgt_gpu_device_list if d.name == tgt_gpu_name), None)
+                        if matching_device:
+                            # key = f'{matching_device.name}_{matching_device.alpha_gpu}_{matching_device.alpha_cpu}'
+                            global_output_by_tgt[matching_device.name][jobid_userid] = tgt_gpu_time_distribution
+            except Exception as e:
+                print(f"Error processing chunk: {e}")
                 traceback.print_exc()
-        
-    print(f"Processed {len(global_output)} jobs in total")
-
+    
     timer_end = time.perf_counter()
     print(f"The process took {timer_end - timer_start:.6f} seconds")
 
-    # Convert nested dictionary structure to flat rows for DataFrame
-    rows = []
-    for jobid_userid, time_distributions_per_job in global_output.items():
-        # time_distributions is a list of dicts (one per target GPU)
-        for time_distribution_tgt in time_distributions_per_job:
-            # Create a row with jobid_userid + all metrics from td_dict
-            row = {'jobid_userid': jobid_userid}
-            row.update(time_distribution_tgt)  # Add all the speedup/fraction columns
-            rows.append(row)
+    # Write individual CSV file for each target GPU
+    for tgt_gpu_key, job_results in global_output_by_tgt.items():
+        if job_results:  # Only write if there are results
+            output_file = f"{tgt_gpu_key}_jobwise_dcgm_hmma_may_2025.parquet"
+            df_output = pd.DataFrame.from_dict(job_results, orient='index')
+            print(df_output)
+            df_output.to_parquet(output_file, engine='pyarrow', index=False)
+            print(f"Wrote {len(job_results)} job results to {output_file}")
+        else:
+            print(f"No results for target GPU: {tgt_gpu_key}")
 
-    # Create DataFrame and save
-    final_df = pd.DataFrame(rows)
-    final_df.to_parquet('jobwise_dcgm_hmma_may_2025.parquet', index=False)
-    print(f"Wrote {len(final_df)} rows to jobwise_dcgm_hmma_may_2025.parquet")
-
-    df = pd.read_parquet('jobwise_dcgm_hmma_may_2025.parquet')
-    print(df)
-
+    print("==============================")
+    print("All output files generated successfully!")
 
 
 if __name__=="__main__":
