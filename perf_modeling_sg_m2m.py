@@ -124,7 +124,7 @@ def process_file(file_path, metric_names):
     header_columns = None
     metric_indices = None
 
-    gpu_pattern = re.compile(rf'^GPU 7\s')
+    gpu_pattern = re.compile(rf'^GPU \d+\s')
     header_pattern = re.compile(r'^#Entity')
 
     # Read the file
