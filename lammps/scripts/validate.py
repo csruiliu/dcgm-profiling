@@ -124,8 +124,6 @@ def main():
         print("Validation:", "FAILED")
 
     print("BenchmarkTime(sec):", T_measured )
-        
 #main
 
 main()
-
