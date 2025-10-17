@@ -5,10 +5,10 @@ import numpy as np
 plt.rcParams['hatch.linewidth'] = 2.0  # Change this value as needed
 
 # Data
-categories = ['H100', 'A100', 'A40']
-measured = [362, 10, 964]
-overlap = [361, 10, 811]
-sequential = [361, 10, 752]
+categories = ['H100', 'A100-40G', 'A40']
+measured = [362, 675, 964]
+overlap = [361, 784.3, 752]
+sequential = [361, 791.4, 811]
 
 # Calculate error percentages: (value - measured) / measured * 100
 overlap_errors = [((ov - meas) / meas * 100) for meas, ov in zip(measured, overlap)]
@@ -24,10 +24,10 @@ fig, ax = plt.subplots(figsize=(14, 8))
 # Create bars
 bars1 = ax.bar(x - width, measured, width, label='Measured', 
                color='white', edgecolor='black', linewidth=2)
-bars2 = ax.bar(x, overlap, width, label='Ovelap', 
+bars2 = ax.bar(x, overlap, width, label='Overlap', 
                color='white', edgecolor='black', linewidth=2, hatch='//')
 bars3 = ax.bar(x + width, sequential, width, label='Sequential', 
-               color='white', edgecolor='black', linewidth=2, hatch='O')
+               color='white', edgecolor='black', linewidth=1.5, hatch='O')
 
 # Add value labels on bars
 for i, (meas, ov, seq, ov_err, seq_err) in enumerate(zip(measured, overlap, sequential, overlap_errors, sequential_errors)):
