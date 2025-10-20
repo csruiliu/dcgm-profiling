@@ -357,6 +357,10 @@ class PerformanceProfiler:
             results['fp32a_ref'].append(mv.get('FP32A', 0))
             results['fp16a_ref'].append(mv.get('FP16A', 0))
             
+            # Scale other GPU time
+            clock_ratio = ref_gpu["boost_clock"] / tgt_gpu["boost_clock"]
+            stream_ratio = ref_gpu["num_streams"] / tgt_gpu["num_streams"]
+
             # Calculate SM Occupancy scaling if available
             if has_sm_occ:
                 sm_occ_ref = mv.get('SMOCC', 0)
@@ -369,7 +373,7 @@ class PerformanceProfiler:
                 if sm_occ_tgt > 0.01 and sm_occ_ref > 0.01:
                     smocc_scale = sm_occ_ref / sm_occ_tgt
                 else:
-                    smocc_scale = 1.0
+                    smocc_scale = stream_ratio
 
             # Calculate reference components
             ref_components = self.calc_time_components(row, metrics, ref_gpu)
@@ -389,10 +393,6 @@ class PerformanceProfiler:
             
             results['t_roofline_overlap'].append(t_roofline_overlap)
             results['t_roofline_sequential'].append(t_roofline_sequential)
-            
-            # Scale other GPU time
-            clock_ratio = ref_gpu["boost_clock"] / tgt_gpu["boost_clock"]
-            stream_ratio = ref_gpu["num_streams"] / tgt_gpu["num_streams"]
             
             t_other_gpu_overlap = ref_components['t_other_gpu_overlap'] * clock_ratio * smocc_scale
             t_other_gpu_sequential = ref_components['t_other_gpu_sequential'] * clock_ratio * smocc_scale
