@@ -8,36 +8,37 @@ from typing import Dict, List, Optional, Tuple
 
 
 # I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
+# shared_mem_per_sm include L1 cache and shared memory
 GPUS = {
     "A100-40": {
         "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
         "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, 
-        "base_clock": 1065, "boost_clock": 1410, 
-        "num_streams": 108, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 164 
+        "base_clock": 765, "boost_clock": 1410, "mem_clock": 1215,
+        "num_sm": 108, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 192
     },
     "A100-80": {
         "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
         "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, 
-        "base_clock": 1065, "boost_clock": 1410, 
-        "num_streams": 108, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 164
+        "base_clock": 1065, "boost_clock": 1410, "mem_clock": 1512,
+        "num_sm": 108, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 192
     },
     "A40": {
         "fp64": 0.58, "tf64": 0, "fp32": 37.4, "tf32": 74.8, "fp16": 37.4, "tf16": 149.7, 
         "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, 
-        "base_clock": 1305, "boost_clock": 1740, 
-        "num_streams": 84, "max_warps_per_sm": 48, "reg_per_sm": 256, "shared_mem_per_sm": 128
+        "base_clock": 1305, "boost_clock": 1740, "mem_clock": 1812,
+        "num_sm": 84, "max_warps_per_sm": 48, "reg_per_sm": 256, "shared_mem_per_sm": 128
     },
     "H100-SXM": {
         "fp64": 34, "tf64": 67, "fp32": 67, "tf32": 989, "fp16": 133.8, "tf16": 1979, 
         "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, 
-        "base_clock": 1590, "boost_clock": 1980, 
-        "num_streams": 132, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 228
+        "base_clock": 1590, "boost_clock": 1980, "mem_clock": 1313, 
+        "num_sm": 132, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 228
     },
     "H100-NVL": {
         "fp64": 30, "tf64": 60, "fp32": 60, "tf32": 835, "fp16": 133.8, "tf16": 1671, 
         "mem_bw": 3900, "pcie_bw": 128, "nvlink_bw": 600, 
-        "base_clock": 1080, "boost_clock": 1785, 
-        "num_streams": 132, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 228
+        "base_clock": 1080, "boost_clock": 1785, "mem_clock": 1593,
+        "num_sm": 114, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 228
     },
 }
 
@@ -187,13 +188,49 @@ class PerformanceProfiler:
     
     def _scale_sm_occupancy(self, sm_occ_ref: float, ref_gpu: Dict[str, float], tgt_gpu: Dict[str, float]) -> float:
         """Scale SM occupancy from reference to target GPU"""
+        '''
         resource_ratio = min(
-            (tgt_gpu.get("num_streams", 1) * tgt_gpu.get("max_warps_per_sm", 1)) / 
-            (ref_gpu.get("num_streams", 1) * ref_gpu.get("max_warps_per_sm", 1)),
+            tgt_gpu.get("max_warps_per_sm", 1) / ref_gpu.get("max_warps_per_sm", 1),
             tgt_gpu.get("reg_per_sm", 1e10) / ref_gpu.get("reg_per_sm", 1e10),
             tgt_gpu.get("shared_mem_per_sm", 1e10) / ref_gpu.get("shared_mem_per_sm", 1e10)
         )
+        '''
+        sm_occ_ref = 0.01 if sm_occ_ref == 0 else sm_occ_ref
+ 
+        resource_ratio = min(
+            tgt_gpu.get("max_warps_per_sm", 1),
+            tgt_gpu.get("reg_per_sm", 1e10) / ref_gpu.get("reg_per_sm", 1e10) * ref_gpu.get("max_warps_per_sm", 1) * sm_occ_ref,
+            tgt_gpu.get("shared_mem_per_sm", 1e10) / ref_gpu.get("shared_mem_per_sm", 1e10) * ref_gpu.get("max_warps_per_sm", 1) * sm_occ_ref
+        ) / (ref_gpu.get("max_warps_per_sm", 1) * sm_occ_ref)
+
         return min(sm_occ_ref * resource_ratio, 1.0)
+
+    def _scale_sm_occupancy_roofline(self, mv: Dict[str, float], smocc_scale: float, 
+                                     ref_components: Dict[str, float], ref_gpu: Dict, tgt_gpu: Dict, precision: str):
+        """Apply estimated SM occupancy to roofline time"""
+        
+        t_flop_tgt = self.sample_intv * sum(
+            mv.get(m, 0) * ref_gpu[precision] / tgt_gpu[precision]
+            if m == 'TENSO' else
+            mv.get(m, 0) * ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]]
+            for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
+        )
+        t_dram_tgt = ref_components['t_dram'] * (ref_gpu["mem_bw"] / tgt_gpu["mem_bw"])
+
+        t_pcie_tgt = ref_components['t_pcie'] * (ref_gpu["pcie_bw"] / tgt_gpu["pcie_bw"])
+        t_nvlink_tgt = ref_components['t_nvlink'] * (ref_gpu["nvlink_bw"] / tgt_gpu["nvlink_bw"])
+        t_other_node_tgt = ref_components['t_other_node']
+
+        t_total_tgt = t_flop_tgt + t_dram_tgt + t_pcie_tgt + t_nvlink_tgt + t_other_node_tgt
+        
+        flop_intensity = t_flop_tgt / t_total_tgt
+        dram_intensity = t_dram_tgt / t_total_tgt
+        # print(f"flop_intensity: {flop_intensity}, dram_intensity:{dram_intensity}")
+        
+        flop_smocc_scale = smocc_scale * flop_intensity
+        dram_smocc_scale = smocc_scale * dram_intensity
+        # print(f"smocc_scale: {smocc_scale}")
+        return flop_smocc_scale, dram_smocc_scale
 
     def calc_time_components(self, row, metrics: List[str], gpu: Dict[str, float]) -> Dict[str, float]:
         """Calculate various time components for a single row"""
@@ -357,9 +394,13 @@ class PerformanceProfiler:
             results['fp32a_ref'].append(mv.get('FP32A', 0))
             results['fp16a_ref'].append(mv.get('FP16A', 0))
             
-            # Scale other GPU time
-            clock_ratio = ref_gpu["boost_clock"] / tgt_gpu["boost_clock"]
-            stream_ratio = ref_gpu["num_streams"] / tgt_gpu["num_streams"]
+            # Some scale ratio
+            compute_util = mv.get('TENSO', 0) + mv.get('FP64A', 0) + mv.get('FP32A', 0) + mv.get('FP16A', 0)
+            dram_util = mv.get('DRAMA', 0)
+            boost_clock_ratio = ref_gpu["boost_clock"] / tgt_gpu["boost_clock"]
+            mem_clock_ratio = ref_gpu["mem_clock"] / tgt_gpu["mem_clock"]
+            warp_ratio = ref_gpu.get("max_warps_per_sm", 1) / tgt_gpu.get("max_warps_per_sm", 1)
+            stream_ratio = ref_gpu.get("num_streams", 1) / tgt_gpu.get("num_streams", 1)
 
             # Calculate SM Occupancy scaling if available
             if has_sm_occ:
@@ -373,29 +414,40 @@ class PerformanceProfiler:
                 if sm_occ_tgt > 0.01 and sm_occ_ref > 0.01:
                     smocc_scale = sm_occ_ref / sm_occ_tgt
                 else:
-                    smocc_scale = stream_ratio
-
+                    smocc_scale = 1.0
+            
             # Calculate reference components
             ref_components = self.calc_time_components(row, metrics, ref_gpu)
             
-            # Calculate target times with scaling
-            t_flop_target = self.sample_intv * sum(
-                mv.get(m, 0) * ref_gpu[precision] / tgt_gpu[precision]
-                if m == 'TENSO' else
-                mv.get(m, 0) * ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]]
-                for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
-            )
+            # flop_smocc_scale, dram_smocc_scale = self._scale_sm_occupancy_roofline(mv, smocc_scale, ref_components, ref_gpu, tgt_gpu, precision)
+            flop_roofline_scale = stream_ratio * warp_ratio * boost_clock_ratio * smocc_scale
+            dram_roofline_scale = stream_ratio * warp_ratio * boost_clock_ratio * smocc_scale * mem_clock_ratio
             
-            t_dram_target = self.sample_intv * mv.get('DRAMA', 0) * (ref_gpu["mem_bw"] / tgt_gpu["mem_bw"])
-            
+            if compute_util > dram_util:
+                t_flop_target = self.sample_intv * sum(
+                    mv.get(m, 0) * ref_gpu[precision] / tgt_gpu[precision]
+                    if m == 'TENSO' else
+                    mv.get(m, 0) * ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]]
+                    for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
+                )
+                t_dram_target = ref_components['t_dram'] * ref_gpu["mem_bw"] / tgt_gpu["mem_bw"]
+            else:
+                t_flop_target = self.sample_intv * sum(
+                    mv.get(m, 0) * max(ref_gpu[precision] / tgt_gpu[precision], ref_gpu[precision] / tgt_gpu[precision] * flop_roofline_scale)
+                    if m == 'TENSO' else
+                    mv.get(m, 0) * max(ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]], ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]] * flop_roofline_scale)
+                    for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
+                )
+                t_dram_target = ref_components['t_dram'] * max(ref_gpu["mem_bw"] / tgt_gpu["mem_bw"], dram_roofline_scale)
+
             t_roofline_overlap = max(t_flop_target, t_dram_target)
             t_roofline_sequential = (t_flop_target + t_dram_target)
             
             results['t_roofline_overlap'].append(t_roofline_overlap)
             results['t_roofline_sequential'].append(t_roofline_sequential)
-            
-            t_other_gpu_overlap = ref_components['t_other_gpu_overlap'] * clock_ratio * smocc_scale
-            t_other_gpu_sequential = ref_components['t_other_gpu_sequential'] * clock_ratio * smocc_scale
+
+            t_other_gpu_overlap = ref_components['t_other_gpu_overlap'] * flop_roofline_scale
+            t_other_gpu_sequential = ref_components['t_other_gpu_sequential'] * flop_roofline_scale
             
             results['t_other_gpu_overlap'].append(t_other_gpu_overlap)
             results['t_other_gpu_sequential'].append(t_other_gpu_sequential)
