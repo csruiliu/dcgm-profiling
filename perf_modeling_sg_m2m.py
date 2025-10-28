@@ -339,13 +339,10 @@ class PerformanceProfiler:
         ref_gpu = self._get_gpu_spec(ref_gpu_arch)
         tgt_gpu = self._get_gpu_spec(tgt_gpu_arch)
         
-        # Check if SM_Occ is in metrics
-        has_sm_occ = 'SMOCC' in metrics
-
         # Calculate target metrics
         target_metrics = self._calculate_target_metrics(
             profiled_df, metrics, ref_gpu, tgt_gpu, precision,
-            flop_util_bound_switch, mem_util_bound_switch, has_sm_occ
+            flop_util_bound_switch, mem_util_bound_switch
         )
         
         # Get time slice
@@ -371,18 +368,15 @@ class PerformanceProfiler:
     
     def _calculate_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str],
                                   ref_gpu: Dict, tgt_gpu: Dict, precision: str,
-                                  flop_util: float, mem_util: float, has_sm_occ: bool) -> Dict[str, List[float]]:
+                                  flop_util: float, mem_util: float) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
         results = {
             't_roofline_overlap': [], 't_roofline_sequential': [],
             't_other_gpu_overlap': [], 't_other_gpu_sequential': [],
             't_other_node': [], 't_total_overlap': [], 't_total_sequential': [],
-            'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': []
+            'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': [],
+            'sm_occ_ref': [], 'sm_occ_tgt': []
         }
-
-        if has_sm_occ:
-            results['sm_occ_ref'] = []
-            results['sm_occ_tgt'] = []
         
         for row in profiled_df.itertuples(index=False):
             mv = {metric: getattr(row, metric) for metric in metrics}
@@ -403,18 +397,17 @@ class PerformanceProfiler:
             stream_ratio = ref_gpu.get("num_streams", 1) / tgt_gpu.get("num_streams", 1)
 
             # Calculate SM Occupancy scaling if available
-            if has_sm_occ:
-                sm_occ_ref = mv.get('SMOCC', 0)
-                sm_occ_tgt = self._scale_sm_occupancy(sm_occ_ref, ref_gpu, tgt_gpu)
+            sm_occ_ref = mv.get('SMOCC', 0)
+            sm_occ_tgt = self._scale_sm_occupancy(sm_occ_ref, ref_gpu, tgt_gpu)
 
-                results['sm_occ_ref'].append(sm_occ_ref)
-                results['sm_occ_tgt'].append(sm_occ_tgt)
-                
-                # Calculate efficiency scale (avoid division by zero)
-                if sm_occ_tgt > 0.01 and sm_occ_ref > 0.01:
-                    smocc_scale = sm_occ_ref / sm_occ_tgt
-                else:
-                    smocc_scale = 1.0
+            results['sm_occ_ref'].append(sm_occ_ref)
+            results['sm_occ_tgt'].append(sm_occ_tgt)
+            
+            # Calculate efficiency scale (avoid division by zero)
+            if sm_occ_tgt > 0.01 and sm_occ_ref > 0.01:
+                smocc_scale = sm_occ_ref / sm_occ_tgt
+            else:
+                smocc_scale = 1.0
             
             # Calculate reference components
             ref_components = self.calc_time_components(row, metrics, ref_gpu)
