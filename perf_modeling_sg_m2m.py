@@ -7,38 +7,46 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 
-# I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
-# shared_mem_per_sm include L1 cache and shared memory
+# For reference: 
+# 1. https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf
+# 2. https://www.techpowerup.com/gpu-specs
+# 3. NVIDIA GPU Data Sheet Webpage
+# Unified Cache includes include L1 cache and shared memory
 GPUS = {
     "A100-40": {
         "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
         "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, 
         "base_clock": 765, "boost_clock": 1410, "mem_clock": 1215,
-        "num_sm": 108, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 192
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 164, "uni_cache_sm": 192,
+        "num_sm": 108
     },
     "A100-80": {
         "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
         "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, 
         "base_clock": 1065, "boost_clock": 1410, "mem_clock": 1512,
-        "num_sm": 108, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 192
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 164, "uni_cache_sm": 192,
+        "num_sm": 108, 
     },
     "A40": {
         "fp64": 0.58, "tf64": 0, "fp32": 37.4, "tf32": 74.8, "fp16": 37.4, "tf16": 149.7, 
         "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, 
-        "base_clock": 1305, "boost_clock": 1740, "mem_clock": 1812,
-        "num_sm": 84, "max_warps_per_sm": 48, "reg_per_sm": 256, "shared_mem_per_sm": 128
+        "base_clock": 1305, "boost_clock": 1740, "mem_clock": 1812, 
+        "max_warps_sm": 48, "reg_size_sm": 256, "shmem_sm": 100, "uni_cache_sm": 128,
+        "num_sm": 84
     },
     "H100-SXM": {
         "fp64": 34, "tf64": 67, "fp32": 67, "tf32": 989, "fp16": 133.8, "tf16": 1979, 
         "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, 
         "base_clock": 1590, "boost_clock": 1980, "mem_clock": 1313, 
-        "num_sm": 132, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 228
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 228, "uni_cache_sm": 256,
+        "num_sm": 132
     },
     "H100-NVL": {
         "fp64": 30, "tf64": 60, "fp32": 60, "tf32": 835, "fp16": 133.8, "tf16": 1671, 
         "mem_bw": 3900, "pcie_bw": 128, "nvlink_bw": 600, 
         "base_clock": 1080, "boost_clock": 1785, "mem_clock": 1593,
-        "num_sm": 114, "max_warps_per_sm": 64, "reg_per_sm": 256, "shared_mem_per_sm": 228
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 228, "uni_cache_sm": 256,
+        "num_sm": 114
     },
 }
 
@@ -190,18 +198,18 @@ class PerformanceProfiler:
         """Scale SM occupancy from reference to target GPU"""
         '''
         resource_ratio = min(
-            tgt_gpu.get("max_warps_per_sm", 1) / ref_gpu.get("max_warps_per_sm", 1),
-            tgt_gpu.get("reg_per_sm", 1e10) / ref_gpu.get("reg_per_sm", 1e10),
-            tgt_gpu.get("shared_mem_per_sm", 1e10) / ref_gpu.get("shared_mem_per_sm", 1e10)
+            tgt_gpu.get("max_warps_sm", 1) / ref_gpu.get("max_warps_sm", 1),
+            tgt_gpu.get("reg_size_sm", 1e10) / ref_gpu.get("reg_size_sm", 1e10),
+            tgt_gpu.get("shmem_sm", 1e10) / ref_gpu.get("shmem_sm", 1e10)
         )
         '''
         sm_occ_ref = 0.01 if sm_occ_ref == 0 else sm_occ_ref
  
         resource_ratio = min(
-            tgt_gpu.get("max_warps_per_sm", 1),
-            tgt_gpu.get("reg_per_sm", 1e10) / ref_gpu.get("reg_per_sm", 1e10) * ref_gpu.get("max_warps_per_sm", 1) * sm_occ_ref,
-            tgt_gpu.get("shared_mem_per_sm", 1e10) / ref_gpu.get("shared_mem_per_sm", 1e10) * ref_gpu.get("max_warps_per_sm", 1) * sm_occ_ref
-        ) / (ref_gpu.get("max_warps_per_sm", 1) * sm_occ_ref)
+            tgt_gpu.get("max_warps_sm", 1),
+            tgt_gpu.get("reg_size_sm", 1e10) / ref_gpu.get("reg_size_sm", 1e10) * ref_gpu.get("max_warps_sm", 1) * sm_occ_ref,
+            tgt_gpu.get("shmem_sm", 1e10) / ref_gpu.get("shmem_sm", 1e10) * ref_gpu.get("max_warps_sm", 1) * sm_occ_ref
+        ) / (ref_gpu.get("max_warps_sm", 1) * sm_occ_ref)
 
         return min(sm_occ_ref * resource_ratio, 1.0)
 
@@ -393,8 +401,8 @@ class PerformanceProfiler:
             dram_util = mv.get('DRAMA', 0)
             boost_clock_ratio = ref_gpu["boost_clock"] / tgt_gpu["boost_clock"]
             mem_clock_ratio = ref_gpu["mem_clock"] / tgt_gpu["mem_clock"]
-            warp_ratio = ref_gpu.get("max_warps_per_sm", 1) / tgt_gpu.get("max_warps_per_sm", 1)
-            stream_ratio = ref_gpu.get("num_streams", 1) / tgt_gpu.get("num_streams", 1)
+            warp_ratio = ref_gpu.get("max_warps_sm", 1) / tgt_gpu.get("max_warps_sm", 1)
+            stream_ratio = ref_gpu.get("num_sm", 1) / tgt_gpu.get("num_sm", 1)
 
             # Calculate SM Occupancy scaling if available
             sm_occ_ref = mv.get('SMOCC', 0)
