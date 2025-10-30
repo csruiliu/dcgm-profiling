@@ -194,24 +194,22 @@ class PerformanceProfiler:
             raise ValueError(f"GPU architecture '{gpu_arch}' not found in GPU_SPECS")
         return GPUS[gpu_arch]
     
-    def _scale_sm_occupancy(self, sm_occ_ref: float, ref_gpu: Dict[str, float], tgt_gpu: Dict[str, float]) -> float:
-        """Scale SM occupancy from reference to target GPU"""
-        '''
-        resource_ratio = min(
+    def _bound_smocc(self, sm_occ_ref: float, ref_gpu: Dict[str, float], tgt_gpu: Dict[str, float]) -> tuple[float, float]:
+        """Bound target GPU using reference GPU specification"""
+        
+        smocc_tgt_lower = sm_occ_ref * min(
             tgt_gpu.get("max_warps_sm", 1) / ref_gpu.get("max_warps_sm", 1),
             tgt_gpu.get("reg_size_sm", 1e10) / ref_gpu.get("reg_size_sm", 1e10),
             tgt_gpu.get("shmem_sm", 1e10) / ref_gpu.get("shmem_sm", 1e10)
         )
-        '''
-        sm_occ_ref = 0.01 if sm_occ_ref == 0 else sm_occ_ref
- 
-        resource_ratio = min(
-            tgt_gpu.get("max_warps_sm", 1),
-            tgt_gpu.get("reg_size_sm", 1e10) / ref_gpu.get("reg_size_sm", 1e10) * ref_gpu.get("max_warps_sm", 1) * sm_occ_ref,
-            tgt_gpu.get("shmem_sm", 1e10) / ref_gpu.get("shmem_sm", 1e10) * ref_gpu.get("max_warps_sm", 1) * sm_occ_ref
-        ) / (ref_gpu.get("max_warps_sm", 1) * sm_occ_ref)
 
-        return min(sm_occ_ref * resource_ratio, 1.0)
+        smocc_tgt_upper = sm_occ_ref * max(
+            tgt_gpu.get("max_warps_sm", 1) / ref_gpu.get("max_warps_sm", 1),
+            tgt_gpu.get("reg_size_sm", 1e10) / ref_gpu.get("reg_size_sm", 1e10),
+            tgt_gpu.get("shmem_sm", 1e10) / ref_gpu.get("shmem_sm", 1e10)
+        )
+    
+        return smocc_tgt_lower, smocc_tgt_upper
 
     def _scale_sm_occupancy_roofline(self, mv: Dict[str, float], smocc_scale: float, 
                                      ref_components: Dict[str, float], ref_gpu: Dict, tgt_gpu: Dict, precision: str):
@@ -397,59 +395,87 @@ class PerformanceProfiler:
             results['fp16a_ref'].append(mv.get('FP16A', 0))
             
             # Some scale ratio
-            compute_util = mv.get('TENSO', 0) + mv.get('FP64A', 0) + mv.get('FP32A', 0) + mv.get('FP16A', 0)
-            dram_util = mv.get('DRAMA', 0)
             boost_clock_ratio = ref_gpu["boost_clock"] / tgt_gpu["boost_clock"]
             mem_clock_ratio = ref_gpu["mem_clock"] / tgt_gpu["mem_clock"]
             warp_ratio = ref_gpu.get("max_warps_sm", 1) / tgt_gpu.get("max_warps_sm", 1)
-            stream_ratio = ref_gpu.get("num_sm", 1) / tgt_gpu.get("num_sm", 1)
+            sm_ratio = ref_gpu.get("num_sm", 1) / tgt_gpu.get("num_sm", 1)
 
-            # Calculate SM Occupancy scaling if available
-            sm_occ_ref = mv.get('SMOCC', 0)
-            sm_occ_tgt = self._scale_sm_occupancy(sm_occ_ref, ref_gpu, tgt_gpu)
-
-            results['sm_occ_ref'].append(sm_occ_ref)
-            results['sm_occ_tgt'].append(sm_occ_tgt)
+            # Bound SMOCC and Calculate SMOCC scale factor
+            smocc_ref = max(mv.get('SMOCC', 0), 1e-9)
+            smocc_tgt_lower, smocc_tgt_upper = self._bound_smocc(smocc_ref, ref_gpu, tgt_gpu)
             
-            # Calculate efficiency scale (avoid division by zero)
-            if sm_occ_tgt > 0.01 and sm_occ_ref > 0.01:
-                smocc_scale = sm_occ_ref / sm_occ_tgt
-            else:
-                smocc_scale = 1.0
+            # compute workload type scale factor
+            flop_tgt_approx = sum(
+                mv.get(m, 0) * ref_gpu[precision] / tgt_gpu[precision]
+                if m == 'TENSO' else
+                mv.get(m, 0) * ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]]
+                for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
+            )
+            tensor_tgt_approx =  mv.get('TENSOR', 0) * ref_gpu[precision] / tgt_gpu[precision]
+            fp64_tgt_approx =  mv.get('FP64A', 0) * ref_gpu['fp64'] / tgt_gpu['fp64']
+            fp32_tgt_approx =  mv.get('FP32A', 0) * ref_gpu['fp32'] / tgt_gpu['fp32']
+            fp16_tgt_approx =  mv.get('FP16A', 0) * ref_gpu['fp16'] / tgt_gpu['fp16']
+            drama_tgt_approx = mv.get('DRAMA', 0) * ref_gpu["mem_bw"] / tgt_gpu["mem_bw"]
+
+            flop_ref = mv.get('TENSOR', 0) + mv.get('FP64A', 0) + mv.get('FP32A', 0) + mv.get('FP16A', 0)
+            drama_ref = mv.get('DRAMA', 0) 
+            gract_ref = mv.get('GRACT', 0) 
+            dram_ref_intensity = drama_ref / (flop_ref + flop_ref) if (flop_ref + flop_ref) != 0 else 0
+            tensor_ref_intensity = mv.get('TENSOR', 0) / (flop_ref + flop_ref) if (flop_ref + flop_ref) != 0 else 0
+            fp64_ref_intensity = mv.get('FP64A', 0) / (flop_ref + flop_ref) if (flop_ref + flop_ref) != 0 else 0
+            fp32_ref_intensity = mv.get('FP32A', 0) / (flop_ref + flop_ref) if (flop_ref + flop_ref) != 0 else 0
+            fp16_ref_intensity = mv.get('FP16A', 0) / (flop_ref + flop_ref) if (flop_ref + flop_ref) != 0 else 0
+
+            dram_tgt_intensity = drama_tgt_approx / (drama_tgt_approx + flop_tgt_approx) if (drama_tgt_approx + flop_tgt_approx) != 0 else 0
+            tensor_tgt_intensity = tensor_tgt_approx / (drama_tgt_approx + flop_tgt_approx) if (drama_tgt_approx + flop_tgt_approx) != 0 else 0
+            fp64_tgt_intensity = fp64_tgt_approx / (drama_tgt_approx + flop_tgt_approx) if (drama_tgt_approx + flop_tgt_approx) != 0 else 0
+            fp32_tgt_intensity = fp32_tgt_approx / (drama_tgt_approx + flop_tgt_approx) if (drama_tgt_approx + flop_tgt_approx) != 0 else 0
+            fp16_tgt_intensity = fp16_tgt_approx / (drama_tgt_approx + flop_tgt_approx) if (drama_tgt_approx + flop_tgt_approx) != 0 else 0
+
+            # compute theta scale factor
+            active_warps_tgt_lower = smocc_tgt_lower * tgt_gpu['num_sm'] * tgt_gpu['max_warps_sm']
+            active_warps_tgt_upper = smocc_tgt_upper * tgt_gpu['num_sm'] * tgt_gpu['max_warps_sm']
+            active_warps_ref = smocc_ref * ref_gpu['num_sm'] * ref_gpu['max_warps_sm']
+            
+            drama_tgt_lower = drama_ref + drama_ref * (active_warps_tgt_lower * dram_tgt_intensity - active_warps_ref * dram_ref_intensity) / (active_warps_ref * dram_ref_intensity) if dram_ref_intensity != 0 else 0
+            drama_tgt_upper = drama_ref + drama_ref * (active_warps_tgt_upper * dram_tgt_intensity - active_warps_ref * dram_ref_intensity) / (active_warps_ref * dram_ref_intensity) if dram_ref_intensity != 0 else 0
+            t_dram_tgt_lower = self.sample_intv * drama_ref * drama_ref * ref_gpu["mem_bw"] / (drama_tgt_lower * tgt_gpu["mem_bw"]) if drama_tgt_lower != 0 else 0
+            t_dram_tgt_upper = self.sample_intv * drama_ref * drama_ref * ref_gpu["mem_bw"] / (drama_tgt_upper * tgt_gpu["mem_bw"]) if drama_tgt_upper != 0 else 0
+
+            tensor_ref = mv.get('TENSO', 0)
+            tensor_tgt_lower = tensor_ref + tensor_ref * (active_warps_tgt_lower * tensor_tgt_intensity - active_warps_ref * tensor_ref_intensity) / (active_warps_ref * tensor_ref_intensity) if tensor_ref_intensity != 0 else 0
+            tensor_tgt_upper = tensor_ref + tensor_ref * (active_warps_tgt_upper * tensor_tgt_intensity - active_warps_ref * tensor_ref_intensity) / (active_warps_ref * tensor_ref_intensity) if tensor_ref_intensity != 0 else 0
+
+            fp64a_ref = mv.get('FP64A', 0)
+            fp64_tgt_lower = fp64a_ref + fp64a_ref * (active_warps_tgt_lower * fp64_tgt_intensity - active_warps_ref * fp64_ref_intensity) / (active_warps_ref * fp64_ref_intensity) if fp64_ref_intensity != 0 else 0
+            fp64_tgt_upper = fp64a_ref + fp64a_ref * (active_warps_tgt_upper * fp64_tgt_intensity - active_warps_ref * fp64_ref_intensity) / (active_warps_ref * fp64_ref_intensity) if fp64_ref_intensity != 0 else 0
+            
+            fp32a_ref = mv.get('FP32A', 0)
+            fp32a_tgt_lower = fp32a_ref + fp32a_ref * (active_warps_tgt_lower * fp64_tgt_intensity - active_warps_ref * fp32_ref_intensity) / (active_warps_ref * fp32_ref_intensity) if fp32_ref_intensity != 0 else 0
+            fp32a_tgt_upper = fp32a_ref + fp32a_ref * (active_warps_tgt_upper * fp64_tgt_intensity - active_warps_ref * fp32_ref_intensity) / (active_warps_ref * fp32_ref_intensity) if fp32_ref_intensity != 0 else 0
+            
+            fp16a_ref = mv.get('FP16A', 0)
+            fp16a_tgt_lower = fp16a_ref + fp16a_ref * (active_warps_tgt_lower * fp64_tgt_intensity - active_warps_ref * fp16_ref_intensity) / (active_warps_ref * fp16_ref_intensity) if fp16_ref_intensity != 0 else 0
+            fp16a_tgt_upper = fp16a_ref + fp16a_ref * (active_warps_tgt_upper * fp64_tgt_intensity - active_warps_ref * fp16_ref_intensity) / (active_warps_ref * fp16_ref_intensity) if fp16_ref_intensity != 0 else 0
+
+            t_flop_tgt_lower = tensor_tgt_lower + fp64_tgt_lower + fp32a_tgt_lower + fp16a_tgt_lower
+            t_flop_tgt_upper = tensor_tgt_upper + fp64_tgt_upper + fp32a_tgt_upper + fp16a_tgt_upper
             
             # Calculate reference components
             ref_components = self.calc_time_components(row, metrics, ref_gpu)
-            
-            # flop_smocc_scale, dram_smocc_scale = self._scale_sm_occupancy_roofline(mv, smocc_scale, ref_components, ref_gpu, tgt_gpu, precision)
-            flop_roofline_scale = stream_ratio * warp_ratio * boost_clock_ratio * smocc_scale
-            dram_roofline_scale = stream_ratio * warp_ratio * boost_clock_ratio * smocc_scale * mem_clock_ratio
-            
-            if compute_util > dram_util:
-                t_flop_target = self.sample_intv * sum(
-                    mv.get(m, 0) * ref_gpu[precision] / tgt_gpu[precision]
-                    if m == 'TENSO' else
-                    mv.get(m, 0) * ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]]
-                    for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
-                )
-                t_dram_target = ref_components['t_dram'] * ref_gpu["mem_bw"] / tgt_gpu["mem_bw"]
-            else:
-                t_flop_target = self.sample_intv * sum(
-                    mv.get(m, 0) * max(ref_gpu[precision] / tgt_gpu[precision], ref_gpu[precision] / tgt_gpu[precision] * flop_roofline_scale)
-                    if m == 'TENSO' else
-                    mv.get(m, 0) * max(ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]], ref_gpu[m.lower()[:4]] / tgt_gpu[m.lower()[:4]] * flop_roofline_scale)
-                    for m in ['TENSO', 'FP64A', 'FP32A', 'FP16A']
-                )
-                t_dram_target = ref_components['t_dram'] * max(ref_gpu["mem_bw"] / tgt_gpu["mem_bw"], dram_roofline_scale)
 
-            t_roofline_overlap = max(t_flop_target, t_dram_target)
-            t_roofline_sequential = (t_flop_target + t_dram_target)
+            t_roofline_overlap = max(t_dram_tgt_lower, t_flop_tgt_lower)
+            t_roofline_sequential = (t_dram_tgt_lower + t_flop_tgt_lower)
             
             results['t_roofline_overlap'].append(t_roofline_overlap)
             results['t_roofline_sequential'].append(t_roofline_sequential)
 
+            flop_roofline_scale = sm_ratio * warp_ratio * boost_clock_ratio
+            dram_roofline_scale = sm_ratio * warp_ratio * boost_clock_ratio * mem_clock_ratio
+
             t_other_gpu_overlap = ref_components['t_other_gpu_overlap'] * flop_roofline_scale
             t_other_gpu_sequential = ref_components['t_other_gpu_sequential'] * flop_roofline_scale
-            
+
             results['t_other_gpu_overlap'].append(t_other_gpu_overlap)
             results['t_other_gpu_sequential'].append(t_other_gpu_sequential)
             
