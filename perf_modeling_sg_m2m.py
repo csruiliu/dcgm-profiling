@@ -201,7 +201,7 @@ class PerformanceProfiler:
             sm_occ_ref * tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm"),
             tgt_gpu.get("max_warps_sm")
         )
-        smocc_tgt_upper = sm_occ_ref * min(
+        smocc_tgt_upper = min(
             max(sm_occ_ref * tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
                 sm_occ_ref * tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm")),
             tgt_gpu.get("max_warps_sm")
@@ -372,8 +372,9 @@ class PerformanceProfiler:
             fp16_intensity_ref = fp16a_ref / gract_ref if gract_ref != 0 else 0
 
             # Bound SMOCC and Calculate SMOCC scale factor
-            smocc_tgt_lower, smocc_tgt_upper = self._bound_smocc(smocc_ref, ref_gpu, tgt_gpu)
-
+            new_smocc_ref = smocc_ref / gract_ref if gract_ref != 0 else 0
+            smocc_tgt_lower, smocc_tgt_upper = self._bound_smocc(new_smocc_ref, ref_gpu, tgt_gpu)
+            
             kernel_ref = smocc_ref * max_warp_sm_ref * num_sm_ref * boost_clock_ref
             kernel_tgt_lower = smocc_tgt_lower * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
             kernel_tgt_upper = smocc_tgt_upper * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
