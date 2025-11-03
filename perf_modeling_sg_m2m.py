@@ -229,13 +229,13 @@ class PerformanceProfiler:
     
     def get_time_slice(self, overall_runtime_ms: float, start_ts: Optional[float], end_ts: Optional[float], data_length: int) -> TimeSlice:
         """Calculate time slice indices"""
+        # Use overall runtime as end timestamp, also start_idx by default is 0
         finish_idx = min(int(overall_runtime_ms / (self.sample_intv * 1000)), data_length)
+        start_idx = int(start_ts / (self.sample_intv * 1000))
+        time_slice = TimeSlice(start_idx=start_idx, end_idx=finish_idx)
 
-        time_slice = TimeSlice(end_idx=finish_idx)
-        
-        if start_ts is not None or end_ts is not None:
-            time_slice.start_idx = max(0, int(start_ts / (self.sample_intv * 1000))) if start_ts else 0
-            time_slice.end_idx = min(finish_idx, int(end_ts / (self.sample_intv * 1000))) if end_ts else finish_idx
+        if end_ts is not None:
+            time_slice.end_idx = min(finish_idx, int(end_ts / (self.sample_intv * 1000)))
             if time_slice.start_idx > time_slice.end_idx:
                 raise ValueError("End timestamp is earlier than start timestamp")
         
@@ -447,7 +447,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-d', '--sample_interval_ms', type=int, required=True,
                        help='Sample interval in milliseconds')
     parser.add_argument('-st', '--start_timestamp', type=int, default=0, help='Start timestamp (ms)')
-    parser.add_argument('-et', '--end_timestamp', type=int, help='End timestamp (ms)')
+    parser.add_argument('-et', '--end_timestamp', type=int, default=None, help='End timestamp (ms)')
     parser.add_argument('-o', '--overall_runtime_ms', type=int, required=True,
                        help='Overall runtime in milliseconds')
     parser.add_argument('-rg', '--ref_gpu_architect', required=True, choices=list(GPUS.keys()),
@@ -464,9 +464,6 @@ def parse_arguments() -> argparse.Namespace:
 def main():
     args = parse_arguments()
     
-    # if end timestamp is not provided, then use overall runtime 
-    end_timestamp = args.overall_runtime_ms if args.end_timestamp is None else args.end_timestamp
-
     # Process metrics file
     profiled_df = MetricsProcessor.process_file(args.dcgm_file, args.metrics)
 
@@ -476,7 +473,7 @@ def main():
     # Model reference performance
     profiler.model(
         profiled_df, args.metrics, args.overall_runtime_ms,
-        args.start_timestamp, end_timestamp,
+        args.start_timestamp, args.end_timestamp,
         args.ref_gpu_architect, args.tensor_precision
     )
 
@@ -484,7 +481,7 @@ def main():
     if args.target_gpu_architect:
         profiler.predict(
             profiled_df, args.metrics, args.overall_runtime_ms,
-            args.start_timestamp, end_timestamp,
+            args.start_timestamp, args.end_timestamp,
             args.ref_gpu_architect, args.target_gpu_architect,
             args.tensor_precision
         )
