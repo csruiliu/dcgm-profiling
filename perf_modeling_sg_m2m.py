@@ -286,8 +286,7 @@ class PerformanceProfiler:
     
     def predict(self, profiled_df: pd.DataFrame, metrics: List[str],
                 overall_runtime_ms: float, start_ts: Optional[float], end_ts: Optional[float], 
-                ref_gpu_arch: str, tgt_gpu_arch: str, precision: str, 
-                flop_util_bound_switch: float = 1.0, mem_util_bound_switch: float = 1.0):
+                ref_gpu_arch: str, tgt_gpu_arch: str, precision: str):
         """Predict performance on target hardware"""
         ref_gpu = self._get_gpu_spec(ref_gpu_arch)
         tgt_gpu = self._get_gpu_spec(tgt_gpu_arch)
@@ -295,7 +294,6 @@ class PerformanceProfiler:
         # Calculate target metrics
         target_metrics = self._calculate_target_metrics(
             profiled_df, metrics, ref_gpu, tgt_gpu, precision,
-            flop_util_bound_switch, mem_util_bound_switch
         )
         
         # Get time slice
@@ -320,14 +318,11 @@ class PerformanceProfiler:
         self._print_results(sliced_metrics, est_flops, est_mem_bw, tgt_gpu_arch, "Target")
     
     def _calculate_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str],
-                                  ref_gpu: Dict, tgt_gpu: Dict, precision: str,
-                                  flop_util: float, mem_util: float) -> Dict[str, List[float]]:
+                                  ref_gpu: Dict, tgt_gpu: Dict, precision: str) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
         results = {
-            't_kernel_lower': [], 't_kernel_upper': [],
-            't_othernode': [], 't_total_lower': [], 't_total_upper': [],
-            'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': [],
-            'smocc_ref': [], 'smocc_tgt': [], 'gract_ref': []
+            't_kernel_lower': [], 't_kernel_upper': [], 't_othernode': [], 't_total_lower': [], 't_total_upper': [],
+            'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': []
         }
         
         for row in profiled_df.itertuples(index=False):
@@ -340,48 +335,55 @@ class PerformanceProfiler:
             fp32a_ref = mv.get('FP32A')
             fp16a_ref = mv.get('FP16A')
             smocc_ref = mv.get('SMOCC')
-            gract_ref = mv.get('GRACT') 
-            results['gract_ref'].append(gract_ref)
+            gract_ref = mv.get('GRACT')
+
+            # Get reference hardware specification
+            boost_clock_ref = ref_gpu.get("boost_clock")
+            max_warp_sm_ref = ref_gpu.get("max_warps_sm")
+            num_sm_ref = ref_gpu.get("num_sm")
+            mem_bw_ref = ref_gpu.get("mem_bw")
+            flop_fp64_ref = ref_gpu.get("fp64")
+            flop_fp32_ref = ref_gpu.get("fp32")
+            flop_fp16_ref = ref_gpu.get("fp16")
+            
+            # store some dcgm metrics for estimation
             results['drama_ref'].append(drama_ref)
             results['tensor_ref'].append(tensor_ref)
             results['fp64a_ref'].append(fp64a_ref)
             results['fp32a_ref'].append(fp32a_ref)
             results['fp16a_ref'].append(fp16a_ref)
-            results['smocc_ref'].append(smocc_ref)
 
-            # Get hardware specification
-            boost_clock_ref = ref_gpu.get("boost_clock")
             boost_clock_tgt = tgt_gpu.get("boost_clock")
-            max_warp_sm_ref = ref_gpu.get("max_warps_sm")
             max_warp_sm_tgt = tgt_gpu.get("max_warps_sm")
-            num_sm_ref = ref_gpu.get("num_sm")
             num_sm_tgt = tgt_gpu.get("num_sm")
-            mem_bw_ref = ref_gpu.get("mem_bw")
             mem_bw_tgt = tgt_gpu.get("mem_bw")
-            flop_fp64_ref = ref_gpu.get("fp64")
-            flop_fp32_ref = ref_gpu.get("fp32")
-            flop_fp16_ref = ref_gpu.get("fp16")
+            flop_fp64_tgt = tgt_gpu.get("fp64")
+            flop_fp32_tgt = tgt_gpu.get("fp32")
+            flop_fp16_tgt = tgt_gpu.get("fp16")
 
             # Calculate reference components
             ref_components = self.calc_time_components(row, metrics, ref_gpu)
 
-            # Some scale ratio
-            boost_clock_ratio = boost_clock_ref / boost_clock_tgt
-            warp_ratio = max_warp_sm_ref / max_warp_sm_tgt
-            sm_ratio = num_sm_ref / num_sm_tgt
-
+            # Calculate metric intensity
             dram_intensity_ref = drama_ref / gract_ref if gract_ref != 0 else 0
+            tensor_intensity_ref = tensor_ref / gract_ref if gract_ref != 0 else 0
+            fp64_intensity_ref = fp64a_ref / gract_ref if gract_ref != 0 else 0
+            fp32_intensity_ref = fp32a_ref / gract_ref if gract_ref != 0 else 0
+            fp16_intensity_ref = fp16a_ref / gract_ref if gract_ref != 0 else 0
 
             # Bound SMOCC and Calculate SMOCC scale factor
             smocc_tgt_lower, smocc_tgt_upper = self._bound_smocc(smocc_ref, ref_gpu, tgt_gpu)
-            
-            kernel_scale_lower = smocc_tgt_lower * warp_ratio * sm_ratio * boost_clock_ratio
-            kernel_scale_upper = smocc_tgt_upper * warp_ratio * sm_ratio * boost_clock_ratio
-            
-            p_dram_ref = ref_gpu.get("mem_bw") * drama_ref / gract_ref if gract_ref !=0 else 0
+
+            kernel_ref = smocc_ref * max_warp_sm_ref * num_sm_ref * boost_clock_ref
+            kernel_tgt_lower = smocc_tgt_lower * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
+            kernel_tgt_upper = smocc_tgt_upper * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
+            kernel_scale_lower = kernel_tgt_lower / kernel_ref if kernel_ref != 0 else 0
+            kernel_scale_upper = kernel_tgt_upper / kernel_ref if kernel_ref != 0 else 0
+
+            p_dram_ref = ref_gpu.get("mem_bw") * dram_intensity_ref
             p_dram_tgt_lower = min(mem_bw_ref * dram_intensity_ref * kernel_scale_lower, mem_bw_tgt)
             p_dram_tgt_upper = min(mem_bw_ref * dram_intensity_ref * kernel_scale_upper, mem_bw_tgt)
-            
+
             t_kernel_dram_tgt_lower = ref_components["t_kernel"] * (p_dram_ref / p_dram_tgt_lower) if p_dram_tgt_lower !=0 else 0
             t_kernel_dram_tgt_upper = ref_components["t_kernel"] * (p_dram_ref / p_dram_tgt_upper) if p_dram_tgt_upper !=0 else 0
 
@@ -391,14 +393,14 @@ class PerformanceProfiler:
                           (flop_fp32_ref * fp32a_ref / gract_ref) + 
                           (flop_fp16_ref * fp16a_ref / gract_ref)) if gract_ref !=0 else 0
             
-            p_flop_tgt_lower = ((ref_gpu.get(precision) * tensor_ref / gract_ref * kernel_scale_lower) + 
-                                (flop_fp64_ref * fp64a_ref / gract_ref * kernel_scale_lower) + 
-                                (flop_fp32_ref * fp32a_ref / gract_ref * kernel_scale_lower) + 
-                                (flop_fp16_ref * fp16a_ref / gract_ref * kernel_scale_lower)) if gract_ref * kernel_scale_lower != 0 else 0
-            p_flop_tgt_upper = ((ref_gpu.get(precision) * tensor_ref / gract_ref * kernel_scale_upper) + 
-                                (flop_fp64_ref * fp64a_ref / gract_ref * kernel_scale_upper) + 
-                                (flop_fp32_ref * fp32a_ref / gract_ref * kernel_scale_upper) + 
-                                (flop_fp16_ref * fp16a_ref / gract_ref * kernel_scale_upper)) if gract_ref * kernel_scale_lower != 0 else 0
+            p_flop_tgt_lower = (min(ref_gpu.get(precision) * tensor_intensity_ref * kernel_scale_lower, tgt_gpu.get(precision)) + 
+                                min(flop_fp64_ref * fp64_intensity_ref * kernel_scale_lower, flop_fp64_tgt) + 
+                                min(flop_fp32_ref * fp32_intensity_ref * kernel_scale_lower, flop_fp32_tgt) + 
+                                min(flop_fp16_ref * fp16_intensity_ref * kernel_scale_lower, flop_fp16_tgt))
+            p_flop_tgt_upper = (min(ref_gpu.get(precision) * tensor_intensity_ref * kernel_scale_upper, tgt_gpu.get(precision)) + 
+                                min(flop_fp64_ref * fp64_intensity_ref * kernel_scale_upper, flop_fp64_tgt) + 
+                                min(flop_fp32_ref * fp32_intensity_ref * kernel_scale_upper, flop_fp32_tgt) + 
+                                min(flop_fp16_ref * fp16_intensity_ref * kernel_scale_upper, flop_fp16_tgt))
 
             t_kernel_flop_tgt_lower = ref_components["t_kernel"] * (p_flop_ref / p_flop_tgt_lower) if p_flop_tgt_lower !=0 else 0
             t_kernel_flop_tgt_upper = ref_components["t_kernel"] * (p_flop_ref / p_flop_tgt_upper) if p_flop_tgt_upper !=0 else 0
