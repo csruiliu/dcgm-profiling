@@ -196,15 +196,15 @@ class PerformanceProfiler:
     
     def _bound_smocc(self, sm_occ_ref: float, ref_gpu: Dict[str, float], tgt_gpu: Dict[str, float]) -> tuple[float, float]:
         """Bound target GPU using reference GPU specification"""
-        smocc_tgt_lower = sm_occ_ref * min(
-            tgt_gpu.get("max_warps_sm") / ref_gpu.get("max_warps_sm"),
-            tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
-            tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm")
+        smocc_tgt_lower = min(
+            sm_occ_ref * tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
+            sm_occ_ref * tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm"),
+            tgt_gpu.get("max_warps_sm")
         )
-        smocc_tgt_upper = sm_occ_ref * max(
-            tgt_gpu.get("max_warps_sm") / ref_gpu.get("max_warps_sm"),
-            tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
-            tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm")
+        smocc_tgt_upper = sm_occ_ref * min(
+            max(sm_occ_ref * tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
+                sm_occ_ref * tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm")),
+            tgt_gpu.get("max_warps_sm")
         )
     
         return smocc_tgt_lower, smocc_tgt_upper
@@ -388,10 +388,10 @@ class PerformanceProfiler:
             t_kernel_dram_tgt_upper = ref_components["t_kernel"] * (p_dram_ref / p_dram_tgt_upper) if p_dram_tgt_upper !=0 else 0
 
             # compute workload type scale factor
-            p_flop_ref = ((ref_gpu.get(precision) * tensor_ref / gract_ref) + 
-                          (flop_fp64_ref * fp64a_ref / gract_ref) + 
-                          (flop_fp32_ref * fp32a_ref / gract_ref) + 
-                          (flop_fp16_ref * fp16a_ref / gract_ref)) if gract_ref !=0 else 0
+            p_flop_ref = ((ref_gpu.get(precision) * tensor_intensity_ref) + 
+                          (flop_fp64_ref * fp64_intensity_ref) + 
+                          (flop_fp32_ref * fp32_intensity_ref) + 
+                          (flop_fp16_ref * fp16_intensity_ref))
             
             p_flop_tgt_lower = (min(ref_gpu.get(precision) * tensor_intensity_ref * kernel_scale_lower, tgt_gpu.get(precision)) + 
                                 min(flop_fp64_ref * fp64_intensity_ref * kernel_scale_lower, flop_fp64_tgt) + 
