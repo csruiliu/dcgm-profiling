@@ -194,20 +194,30 @@ class PerformanceProfiler:
             raise ValueError(f"GPU architecture '{gpu_arch}' not found in GPU_SPECS")
         return GPUS[gpu_arch]
     
-    def _bound_smocc(self, sm_occ_ref: float, ref_gpu: Dict[str, float], tgt_gpu: Dict[str, float]) -> tuple[float, float]:
+    def _bound_smocc(self, smocc_ref: float, ref_gpu: Dict[str, float], tgt_gpu: Dict[str, float]) -> tuple[float, float]:
         """Bound target GPU using reference GPU specification"""
+        
+        reg_limit = tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm")
+        shmem_limit = tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm")
+
         smocc_tgt_lower = min(
-            sm_occ_ref * tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
-            sm_occ_ref * tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm"),
-            tgt_gpu.get("max_warps_sm")
+            smocc_ref * reg_limit,
+            smocc_ref * shmem_limit,
+            1.0
         )
+        
+        smocc_tgt_middle = min(
+            smocc_ref * (reg_limit + shmem_limit) * 0.5,
+            1.0
+        )   
+
         smocc_tgt_upper = min(
-            max(sm_occ_ref * tgt_gpu.get("reg_size_sm") / ref_gpu.get("reg_size_sm"),
-                sm_occ_ref * tgt_gpu.get("shmem_sm") / ref_gpu.get("shmem_sm")),
-            tgt_gpu.get("max_warps_sm")
+            max(smocc_ref * reg_limit,
+                smocc_ref * shmem_limit),
+            1.0
         )
-    
-        return smocc_tgt_lower, smocc_tgt_upper
+        
+        return smocc_tgt_lower, smocc_tgt_middle, smocc_tgt_upper
 
     def calc_time_components(self, row, metrics: List[str], gpu: Dict[str, float]) -> Dict[str, float]:
         """Calculate various time components for a single row"""
@@ -321,7 +331,8 @@ class PerformanceProfiler:
                                   ref_gpu: Dict, tgt_gpu: Dict, precision: str) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
         results = {
-            't_kernel_lower': [], 't_kernel_upper': [], 't_othernode': [], 't_total_lower': [], 't_total_upper': [],
+            't_kernel_lower': [], 't_kernel_upper': [], 't_kernel_mid': [],
+            't_othernode': [], 't_total_lower': [], 't_total_upper': [], 't_total_mid': [],
             'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': []
         }
         
@@ -329,14 +340,14 @@ class PerformanceProfiler:
             mv = {metric: getattr(row, metric) for metric in metrics}
             
             # Get and store the reference metrecis
+            gract_ref = mv.get('GRACT')
             drama_ref = mv.get('DRAMA')
             tensor_ref = mv.get('TENSO')
             fp64a_ref = mv.get('FP64A')
             fp32a_ref = mv.get('FP32A')
             fp16a_ref = mv.get('FP16A')
             smocc_ref = mv.get('SMOCC')
-            gract_ref = mv.get('GRACT')
-
+            
             # Get reference hardware specification
             boost_clock_ref = ref_gpu.get("boost_clock")
             max_warp_sm_ref = ref_gpu.get("max_warps_sm")
@@ -373,20 +384,24 @@ class PerformanceProfiler:
 
             # Bound SMOCC and Calculate SMOCC scale factor
             new_smocc_ref = smocc_ref / gract_ref if gract_ref != 0 else 0
-            smocc_tgt_lower, smocc_tgt_upper = self._bound_smocc(new_smocc_ref, ref_gpu, tgt_gpu)
+            smocc_tgt_lower, smocc_tgt_mid, smocc_tgt_upper = self._bound_smocc(new_smocc_ref, ref_gpu, tgt_gpu)
             
             kernel_ref = smocc_ref * max_warp_sm_ref * num_sm_ref * boost_clock_ref
             kernel_tgt_lower = smocc_tgt_lower * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
             kernel_tgt_upper = smocc_tgt_upper * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
+            kernel_tgt_mid = smocc_tgt_mid * max_warp_sm_tgt * num_sm_tgt * boost_clock_tgt
             kernel_scale_lower = kernel_tgt_lower / kernel_ref if kernel_ref != 0 else 0
             kernel_scale_upper = kernel_tgt_upper / kernel_ref if kernel_ref != 0 else 0
+            kernel_scale_mid = kernel_tgt_mid / kernel_ref if kernel_ref != 0 else 0
 
             p_dram_ref = ref_gpu.get("mem_bw") * dram_intensity_ref
             p_dram_tgt_lower = min(mem_bw_ref * dram_intensity_ref * kernel_scale_lower, mem_bw_tgt)
             p_dram_tgt_upper = min(mem_bw_ref * dram_intensity_ref * kernel_scale_upper, mem_bw_tgt)
+            p_dram_tgt_mid = min(mem_bw_ref * dram_intensity_ref * kernel_scale_mid, mem_bw_tgt)
 
             t_kernel_dram_tgt_lower = ref_components["t_kernel"] * (p_dram_ref / p_dram_tgt_lower) if p_dram_tgt_lower !=0 else 0
             t_kernel_dram_tgt_upper = ref_components["t_kernel"] * (p_dram_ref / p_dram_tgt_upper) if p_dram_tgt_upper !=0 else 0
+            t_kernel_dram_tgt_mid = ref_components["t_kernel"] * (p_dram_ref / p_dram_tgt_mid) if p_dram_tgt_mid !=0 else 0
 
             # compute workload type scale factor
             p_flop_ref = ((ref_gpu.get(precision) * tensor_intensity_ref) + 
@@ -402,14 +417,21 @@ class PerformanceProfiler:
                                 min(flop_fp64_ref * fp64_intensity_ref * kernel_scale_upper, flop_fp64_tgt) + 
                                 min(flop_fp32_ref * fp32_intensity_ref * kernel_scale_upper, flop_fp32_tgt) + 
                                 min(flop_fp16_ref * fp16_intensity_ref * kernel_scale_upper, flop_fp16_tgt))
+            p_flop_tgt_mid = (min(ref_gpu.get(precision) * tensor_intensity_ref * kernel_scale_mid, tgt_gpu.get(precision)) + 
+                                min(flop_fp64_ref * fp64_intensity_ref * kernel_scale_mid, flop_fp64_tgt) + 
+                                min(flop_fp32_ref * fp32_intensity_ref * kernel_scale_mid, flop_fp32_tgt) + 
+                                min(flop_fp16_ref * fp16_intensity_ref * kernel_scale_mid, flop_fp16_tgt))
 
             t_kernel_flop_tgt_lower = ref_components["t_kernel"] * (p_flop_ref / p_flop_tgt_lower) if p_flop_tgt_lower !=0 else 0
             t_kernel_flop_tgt_upper = ref_components["t_kernel"] * (p_flop_ref / p_flop_tgt_upper) if p_flop_tgt_upper !=0 else 0
+            t_kernel_flop_tgt_mid = ref_components["t_kernel"] * (p_flop_ref / p_flop_tgt_mid) if p_flop_tgt_upper !=0 else 0
 
             t_kernel_tgt_lower = max(t_kernel_dram_tgt_lower, t_kernel_flop_tgt_lower)
             t_kernel_tgt_upper = max(t_kernel_dram_tgt_upper, t_kernel_flop_tgt_upper)
+            t_kernel_tgt_mid = max(t_kernel_dram_tgt_mid, t_kernel_flop_tgt_mid)
             results['t_kernel_lower'].append(t_kernel_tgt_lower)
             results['t_kernel_upper'].append(t_kernel_tgt_upper)
+            results['t_kernel_mid'].append(t_kernel_tgt_mid)
 
             # Scale interconnect times
             t_othernode_tgt = ref_components['t_othernode']
@@ -418,10 +440,12 @@ class PerformanceProfiler:
             
             # Calculate totals
             t_total_lower = t_kernel_tgt_lower + t_othernode_tgt
-            t_total_total = t_kernel_tgt_upper + t_othernode_tgt
+            t_total_upper = t_kernel_tgt_upper + t_othernode_tgt
+            t_total_mid = t_kernel_tgt_mid + t_othernode_tgt
             
             results['t_total_lower'].append(t_total_lower)
-            results['t_total_upper'].append(t_total_total)
+            results['t_total_upper'].append(t_total_upper)
+            results['t_total_mid'].append(t_total_mid)
         
         return results
     
@@ -436,10 +460,12 @@ class PerformanceProfiler:
             print(f"Estimate Total Runtime On {hw_type} Hardware: {sum(metrics['t_total']):.2f}")
         else:
             print(f"Estimate Kernel Time On {hw_type} Hardware [Lower SMOCC]: {sum(metrics['t_kernel_lower']):.2f}")
-            print(f"Estimate otherGPU Time On {hw_type} Hardware [Upper SMOCC]: {sum(metrics['t_kernel_upper']):.2f}")
+            print(f"Estimate Kernel Time On {hw_type} Hardware [Upper SMOCC]: {sum(metrics['t_kernel_upper']):.2f}")
+            print(f"Estimate Kernel Time On {hw_type} Hardware [Mid SMOCC]: {sum(metrics['t_kernel_mid']):.2f}")
             print(f"Estimate otherNode Time On {hw_type} Hardware: {sum(metrics['t_othernode']):.2f}")
             print(f"Estimate Total Runtime On {hw_type} Hardware [Lower SMOCC]: {sum(metrics['t_total_lower']):.2f}")
             print(f"Estimate Total Runtime On {hw_type} Hardware [Upper SMOCC]: {sum(metrics['t_total_upper']):.2f}")
+            print(f"Estimate Total Runtime On {hw_type} Hardware [Mid SMOCC]: {sum(metrics['t_total_mid']):.2f}")
         print()
 
 
