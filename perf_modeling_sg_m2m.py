@@ -73,11 +73,6 @@ class GPU:
         """Allow dictionary-style access"""
         return self.specs[key]
     
-    def warps_capacity(self) -> float:
-        """Calculate total compute capacity"""
-        return self.get_specs("max_warps_sm") * self.get_specs("num_sm") * self.get_specs("boost_clock")
-    
-
 class MetricsProcessor:
     """Handles metrics file processing"""
     GPU_PATTERN = re.compile(r'^GPU \d+\s')
@@ -256,70 +251,124 @@ class MetricIntensityCalculator:
         """Calculate all intensity metrics"""
         if metrics.gract == 0:
             return {
-                'dram_gract': 0.0, 'tensor_gract': 0.0, 'fp64_gract': 0.0, 
-                'fp32_gract': 0.0, 'fp16_gract': 0.0, 'smocc_gract': 0.0
+                'drama_gract': 0.0, 'tenso_gract': 0.0, 'fp64a_gract': 0.0, 
+                'fp32a_gract': 0.0, 'fp16a_gract': 0.0, 'smocc_gract': 0.0
             }
         
         return {
-            'dram_gract': metrics.drama / metrics.gract,
-            'tensor_gract': metrics.tenso / metrics.gract,
-            'fp64_gract': metrics.fp64a / metrics.gract,
-            'fp32_gract': metrics.fp32a / metrics.gract,
-            'fp16_gract': metrics.fp16a / metrics.gract,
+            'drama_gract': metrics.drama / metrics.gract,
+            'tenso_gract': metrics.tenso / metrics.gract,
+            'fp64a_gract': metrics.fp64a / metrics.gract,
+            'fp32a_gract': metrics.fp32a / metrics.gract,
+            'fp16a_gract': metrics.fp16a / metrics.gract,
             'smocc_gract': metrics.smocc / metrics.gract
         }
 
 
 class ScaleCalculator:
     """Calculates computational intensities"""
-    def __init__(self, ref_gpu: GPU, tgt_gpu: GPU):
+
+    INTENSITY_THRESHOLD = 0.01
+
+    def __init__(self, ref_gpu: GPU, tgt_gpu: GPU, tensor_prec: str):
         self.ref_gpu = ref_gpu
         self.tgt_gpu = tgt_gpu
-        self.reg_sm_limit = self.tgt_gpu.get_specs("reg_size_sm") / self.ref_gpu.get_specs("reg_size_sm")
-        self.shmem_sm_limit = self.tgt_gpu.get_specs("shmem_sm") / self.ref_gpu.get_specs("shmem_sm")
+        
+        # Precompute ratios
+        self._compute_ratios(tensor_prec)
 
-    def kernel_scale(self, smocc_ref: float, smocc_tgt: float) -> float:
-        kernel_ref = (smocc_ref * self.ref_gpu.warps_capacity())
-        kernel_tgt = (smocc_tgt * self.tgt_gpu.warps_capacity())
+        # Initialize state
+        self.cur_smocc = 0
+        self.cur_warps_ref = 0
+        self.cur_warps_tgt = {'lower': 0, 'mid': 0, 'upper': 0}
+        self.scale_smocc = {'lower': 0, 'mid': 0, 'upper': 0}
 
-        return kernel_tgt / kernel_ref if kernel_ref != 0 else 0
+    def _compute_ratios(self, tensor_prec: str):
+        """Compute all GPU spec ratios once during initialization"""
+        self.reg_sm_limit = self._get_ratio("reg_size_sm")
+        self.shmem_sm_limit = self._get_ratio("shmem_sm")
+        self.bw_ratio = self._get_ratio("mem_bw")
+        self.tensor_ratio = self._get_ratio(tensor_prec)
+        self.fp64_ratio = self._get_ratio("fp64")
+        self.fp32_ratio = self._get_ratio("fp32")
+        self.fp16_ratio = self._get_ratio("fp16")
 
-    def dram_scale(self, intensities: Dict[str, float], kernel_scale: float) -> float:
-        p_dram_ref = self.ref_gpu.get_specs("mem_bw") * intensities.get('dram_gract')
-        p_dram_tgt = min(
-            self.ref_gpu.get_specs("mem_bw") * intensities.get('dram_gract') * kernel_scale, 
-            self.tgt_gpu.get_specs("mem_bw")
-        )
+    def _get_ratio(self, spec: str) -> float:
+        """Helper to compute target/reference ratio for a given spec"""
+        return self.tgt_gpu.get_specs(spec) / self.ref_gpu.get_specs(spec)
 
-        return p_dram_ref / p_dram_tgt if p_dram_tgt != 0 else 0
+    def _estimate_warps(self):
+        ref_max_warps = self.ref_gpu.get_specs("max_warps_sm")
+        tgt_max_warps = self.tgt_gpu.get_specs("max_warps_sm")
 
-    def flop_scale(self, intensities: Dict[str, float], kernel_scale: float, tensor_prec: str) -> float:
-        p_flop_ref = (
-            self.ref_gpu.get_specs(tensor_prec) * intensities.get('tensor_gract') +
-            self.ref_gpu.get_specs("fp64") * intensities.get('fp64_gract') +
-            self.ref_gpu.get_specs("fp32") * intensities.get('fp32_gract') +
-            self.ref_gpu.get_specs("fp16") * intensities.get('fp16_gract')
+        self.cur_warps_ref = self.cur_smocc * ref_max_warps
+
+        self.cur_warps_tgt['lower'] = min(
+            self.cur_warps_ref * self.reg_sm_limit,
+            self.cur_warps_ref * self.shmem_sm_limit,
+            tgt_max_warps
         )
         
-        p_flop_tgt = (
-            min(self.ref_gpu.get_specs(tensor_prec) * intensities.get('tensor_gract') * kernel_scale, 
-                self.tgt_gpu.get_specs(tensor_prec)) +
-            min(self.ref_gpu.get_specs("fp64") * intensities.get('fp64_gract') * kernel_scale, 
-                self.tgt_gpu.get_specs("fp64")) +
-            min(self.ref_gpu.get_specs("fp32") * intensities.get('fp32_gract') * kernel_scale, 
-                self.tgt_gpu.get_specs("fp32")) +
-            min(self.ref_gpu.get_specs("fp16") * intensities.get('fp16_gract') * kernel_scale, 
-                self.tgt_gpu.get_specs("fp16"))
+        self.cur_warps_tgt['mid'] = min(
+            self.cur_warps_ref * (self.reg_sm_limit + self.shmem_sm_limit) * 0.5,
+            tgt_max_warps
+        )   
+
+        self.cur_warps_tgt['upper'] = min(
+            max(self.cur_warps_ref * self.reg_sm_limit,
+                self.cur_warps_ref * self.shmem_sm_limit),
+            tgt_max_warps
         )
+        
+    def refresh_smocc(self, smocc_ref: float):
+        self.cur_smocc = smocc_ref
+        self._estimate_warps()
 
-        return p_flop_ref / p_flop_tgt if p_flop_tgt != 0 else 0
+    def smocc_scale(self) -> Tuple[float, float, float]:
+        """Calculate SM occupancy scaling factors"""
+        k_smocc_ref = self._compute_k_smocc(self.cur_warps_ref, self.ref_gpu)
+        
+        for level in ['lower', 'mid', 'upper']:
+            k_smocc_tgt = self._compute_k_smocc(self.cur_warps_tgt[level], self.tgt_gpu)
+            self.scale_smocc[level] = k_smocc_tgt / k_smocc_ref if k_smocc_ref != 0 else 0
+        
+        return self.scale_smocc['lower'], self.scale_smocc['mid'], self.scale_smocc['upper']
 
-    def reg_limit(self) -> float:
-        return self.reg_sm_limit
+    def _compute_k_smocc(self, warps: float, gpu: GPU) -> float:
+        """Compute k_smocc value for given warps and GPU"""
+        return warps * gpu.get_specs("num_sm") * gpu.get_specs("boost_clock")
 
-    def shmem_limit(self) -> float:
-        return self.shmem_sm_limit
+    def dram_scale(self, dram_ref: float) -> Tuple[float, float, float]:
+        """Calculate DRAM bandwidth scaling factors"""
+        return self._compute_scale(dram_ref, self.bw_ratio)
 
+    def tensor_scale(self, tensor_ref: float) -> Tuple[float, float, float]:
+        """Calculate tensor core scaling factors"""
+        return self._compute_scale(tensor_ref, self.tensor_ratio)
+
+    def fp64_scale(self, fp64_ref: float) -> Tuple[float, float, float]:
+        """Calculate FP64 scaling factors"""
+        return self._compute_scale(fp64_ref, self.fp64_ratio)
+    
+    def fp32_scale(self, fp32_ref: float) -> Tuple[float, float, float]:
+        """Calculate FP32 scaling factors"""
+        return self._compute_scale(fp32_ref, self.fp32_ratio)
+
+    def fp16_scale(self, fp16_ref: float) -> Tuple[float, float, float]:
+        """Calculate FP16 scaling factors"""
+        return self._compute_scale(fp16_ref, self.fp16_ratio)
+
+    def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float]:
+        """Generic method to compute scaling factors for any intensity metric"""
+        if intensity_ref < self.INTENSITY_THRESHOLD:
+            return np.inf, np.inf, np.inf
+        
+        scale_factor = ratio / intensity_ref if intensity_ref != 0 else 0
+        return (
+            min(self.scale_smocc['lower'], scale_factor),
+            min(self.scale_smocc['mid'], scale_factor),
+            min(self.scale_smocc['upper'], scale_factor)
+        )
 
 class ResultsFormatter:
     """Formats and prints results"""
@@ -462,27 +511,6 @@ class TargetPredictor(BaseProfiler):
         # Print predictions
         self.formatter.print_target_results(sliced_metrics, est_flops, est_mem_bw, self.tgt_gpu.get_name())
     
-    def _bound_smocc(self, smocc_ref: float, scale_calc: ScaleCalculator) -> tuple[float, float]:
-        """Bound target GPU using reference GPU specification"""
-        smocc_tgt_lower = min(
-            smocc_ref * scale_calc.reg_limit(),
-            smocc_ref * scale_calc.shmem_limit(),
-            1.0
-        )
-        
-        smocc_tgt_middle = min(
-            smocc_ref * (scale_calc.reg_limit() + scale_calc.shmem_limit()) * 0.5,
-            1.0
-        )   
-
-        smocc_tgt_upper = min(
-            max(smocc_ref * scale_calc.reg_limit(),
-                smocc_ref * scale_calc.shmem_limit()),
-            1.0
-        )
-        
-        return smocc_tgt_lower, smocc_tgt_middle, smocc_tgt_upper
-
     def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str],
                              ref_gpu: GPU, tgt_gpu: GPU, tensor_prec: str) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
@@ -492,7 +520,7 @@ class TargetPredictor(BaseProfiler):
             'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': []
         }
         
-        scale_calc = ScaleCalculator(ref_gpu, tgt_gpu)
+        scale_calc = ScaleCalculator(ref_gpu, tgt_gpu, tensor_prec)
         
         for row in profiled_df.itertuples(index=False):
             mv = MetricValues.from_row(row, metrics)
@@ -510,21 +538,24 @@ class TargetPredictor(BaseProfiler):
             # Calculate reference components
             ref_components = self.time_calc.calc_components(mv)
             
-            # Bound SMOCC
-            smocc_lower, smocc_mid, smocc_upper = self._bound_smocc(
-                intensities['smocc_gract'], scale_calc
-            )
+            # Estimate Warps on target GPU
+            scale_calc.refresh_smocc(intensities['smocc_gract'])
             
             # Calculate kernel scales
-            kernel_scale_lower = scale_calc.kernel_scale(mv.smocc, smocc_lower)
-            kernel_scale_mid = scale_calc.kernel_scale(mv.smocc, smocc_mid)
-            kernel_scale_upper = scale_calc.kernel_scale(mv.smocc, smocc_upper)
+            scale_smocc_lower, scale_smocc_mid, scale_smocc_upper = scale_calc.smocc_scale()
+            scale_dram_lower, scale_dram_mid, scale_dram_upper = scale_calc.dram_scale(intensities['drama_gract'])
+            scale_tensor_lower, scale_tensor_mid, scale_tensor_upper = scale_calc.tensor_scale(intensities['tenso_gract'])
+            scale_fp64_lower, scale_fp64_mid, scale_fp64_upper = scale_calc.fp64_scale(intensities['fp64a_gract'])
+            scale_fp32_lower, scale_fp32_mid, scale_fp32_upper = scale_calc.fp32_scale(intensities['fp32a_gract'])
+            scale_fp16_lower, scale_fp16_mid, scale_fp16_upper = scale_calc.fp16_scale(intensities['fp16a_gract'])
             
+            kernel_scale_lower = min(scale_smocc_lower, scale_dram_lower, scale_tensor_lower, scale_fp64_lower, scale_fp32_lower, scale_fp16_lower)
+            kernel_scale_mid = min(scale_smocc_mid, scale_dram_mid, scale_tensor_mid, scale_fp64_mid, scale_fp32_mid, scale_fp16_mid)
+            kernel_scale_upper = min(scale_smocc_upper, scale_dram_upper, scale_tensor_upper, scale_fp64_upper, scale_fp32_upper, scale_fp16_upper)
+
             # Calculate kernel times for each scenario
             for scale, suffix in [(kernel_scale_lower, 'lower'), (kernel_scale_mid, 'mid'), (kernel_scale_upper, 'upper')]:
-                t_kernel = self._calc_kernel_time(
-                    intensities, scale, ref_components, tensor_prec, scale_calc
-                )
+                t_kernel = ref_components.t_kernel / scale if scale != 0 else 0
                 results[f't_kernel_{suffix}'].append(t_kernel)
             
             # Other node time (unchanged)
@@ -537,20 +568,7 @@ class TargetPredictor(BaseProfiler):
             results['t_total_upper'].append(results['t_kernel_upper'][-1] + t_othernode)
         
         return results
-    
-    def _calc_kernel_time(self, intensities: Dict[str, float], kernel_scale: float,
-                          ref_components: TimeComponents, tensor_prec: str, 
-                          scale_calc: ScaleCalculator) -> float:
-        """Calculate kernel time for target GPU"""
-        # DRAM time
-        t_kernel_dram = ref_components.t_kernel * scale_calc.dram_scale(intensities, kernel_scale)
         
-        # FLOP time
-        t_kernel_flop = ref_components.t_kernel * scale_calc.flop_scale(intensities, kernel_scale, tensor_prec) 
-                        
-        # Return maximum (roofline model)
-        return max(t_kernel_dram, t_kernel_flop)
-    
     def _calc_est_flops(self, sliced_metrics: Dict[str, List[float]], tensor_prec: str) -> float:
         """Calculate estimated FLOPS"""
         return (
