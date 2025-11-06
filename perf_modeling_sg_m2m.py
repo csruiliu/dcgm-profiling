@@ -542,16 +542,16 @@ class TargetPredictor(BaseProfiler):
             scale_calc.refresh_smocc(intensities['smocc_gract'])
             
             # Calculate kernel scales
-            scale_smocc_lower, scale_smocc_mid, scale_smocc_upper = scale_calc.smocc_scale()
-            scale_dram_lower, scale_dram_mid, scale_dram_upper = scale_calc.dram_scale(intensities['drama_gract'])
-            scale_tensor_lower, scale_tensor_mid, scale_tensor_upper = scale_calc.tensor_scale(intensities['tenso_gract'])
-            scale_fp64_lower, scale_fp64_mid, scale_fp64_upper = scale_calc.fp64_scale(intensities['fp64a_gract'])
-            scale_fp32_lower, scale_fp32_mid, scale_fp32_upper = scale_calc.fp32_scale(intensities['fp32a_gract'])
-            scale_fp16_lower, scale_fp16_mid, scale_fp16_upper = scale_calc.fp16_scale(intensities['fp16a_gract'])
+            smocc_lower, smocc_mid, smocc_upper = scale_calc.smocc_scale()
+            dram_lower, dram_mid, dram_upper = scale_calc.dram_scale(intensities['drama_gract'])
+            tensor_lower, tensor_mid, tensor_upper = scale_calc.tensor_scale(intensities['tenso_gract'])
+            fp64_lower, fp64_mid, fp64_upper = scale_calc.fp64_scale(intensities['fp64a_gract'])
+            fp32_lower, fp32_mid, fp32_upper = scale_calc.fp32_scale(intensities['fp32a_gract'])
+            fp16_lower, fp16_mid, fp16_upper = scale_calc.fp16_scale(intensities['fp16a_gract'])
             
-            kernel_scale_lower = min(scale_smocc_lower, scale_dram_lower, scale_tensor_lower, scale_fp64_lower, scale_fp32_lower, scale_fp16_lower)
-            kernel_scale_mid = min(scale_smocc_mid, scale_dram_mid, scale_tensor_mid, scale_fp64_mid, scale_fp32_mid, scale_fp16_mid)
-            kernel_scale_upper = min(scale_smocc_upper, scale_dram_upper, scale_tensor_upper, scale_fp64_upper, scale_fp32_upper, scale_fp16_upper)
+            kernel_scale_lower = min(smocc_lower, dram_lower, tensor_lower, fp64_lower, fp32_lower, fp16_lower)
+            kernel_scale_mid = min(smocc_mid, dram_mid, tensor_mid, fp64_mid, fp32_mid, fp16_mid)
+            kernel_scale_upper = min(smocc_upper, dram_upper, tensor_upper, fp64_upper, fp32_upper, fp16_upper)
 
             # Calculate kernel times for each scenario
             for scale, suffix in [(kernel_scale_lower, 'lower'), (kernel_scale_mid, 'mid'), (kernel_scale_upper, 'upper')]:
