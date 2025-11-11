@@ -560,13 +560,14 @@ class TargetPredictor(BaseProfiler):
             
             # Other node time (unchanged)
             t_othernode = ref_components.t_othernode
+
             results['t_othernode'].append(t_othernode)
             
             # Calculate totals
             results['t_total_lower'].append(results['t_kernel_lower'][-1] + t_othernode)
             results['t_total_mid'].append(results['t_kernel_mid'][-1] + t_othernode)
             results['t_total_upper'].append(results['t_kernel_upper'][-1] + t_othernode)
-        
+
         return results
         
     def _calc_est_flops(self, sliced_metrics: Dict[str, List[float]], tensor_prec: str) -> float:
