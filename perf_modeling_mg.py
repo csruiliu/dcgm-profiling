@@ -1,835 +1,960 @@
-import pandas as pd
-import numpy as np
-import os
-from pathlib import Path
 import argparse
 import re
+import os
+import pandas as pd
+import numpy as np
+
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from pathlib import Path
 from collections import Counter
 
-
-# I got the numbers from nvidia official website and https://www.techpowerup.com/gpu-specs
-GPU_SPECS = {
+# GPU Specifications
+# References: 
+# 1. https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf
+# 2. https://www.techpowerup.com/gpu-specs
+# 3. NVIDIA GPU Data Sheet Webpage
+# Note: Unified Cache includes L1 cache and shared memory
+GPUSpec = {
     "A100-40": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
-        "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
+        "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
+        "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, 
+        "base_clock": 765, "boost_clock": 1410, "mem_clock": 1215,
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 164, "uni_cache_sm": 192,
+        "num_sm": 108
     },
     "A100-80": {
-        "fp64": 9.7, "fp64_tensor": 19.5, "fp32": 19.5, "fp32_tensor": 156, "fp16": 78, "fp16_tensor": 312, 
-        "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, "base_clock": 1065, "boost_clock": 1410, "num_streams": 108
+        "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
+        "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, 
+        "base_clock": 1065, "boost_clock": 1410, "mem_clock": 1512,
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 164, "uni_cache_sm": 192,
+        "num_sm": 108, 
     },
     "A40": {
-        "fp64": 0.58, "fp64_tensor": 0, "fp32": 37.4, "fp32_tensor": 74.8, "fp16": 37.4, "fp16_tensor": 149.7, 
-        "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, "base_clock": 1305, "boost_clock": 1740, "num_streams": 84
+        "fp64": 0.58, "tf64": 0, "fp32": 37.4, "tf32": 74.8, "fp16": 37.4, "tf16": 149.7, 
+        "mem_bw": 696, "pcie_bw": 64, "nvlink_bw": 112.5, 
+        "base_clock": 1305, "boost_clock": 1740, "mem_clock": 1812, 
+        "max_warps_sm": 48, "reg_size_sm": 256, "shmem_sm": 100, "uni_cache_sm": 128,
+        "num_sm": 84
     },
-    "H100": {  # H100 SXM (default)
-        "fp64": 34, "fp64_tensor": 67, "fp32": 67, "fp32_tensor": 989, "fp16": 133.8, "fp16_tensor": 1979, 
-        "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, "base_clock": 1590, "boost_clock": 1980, "num_streams": 132
+    "H100-SXM": {
+        "fp64": 34, "tf64": 67, "fp32": 67, "tf32": 989, "fp16": 133.8, "tf16": 1979, 
+        "mem_bw": 3350, "pcie_bw": 128, "nvlink_bw": 900, 
+        "base_clock": 1590, "boost_clock": 1980, "mem_clock": 1313, 
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 228, "uni_cache_sm": 256,
+        "num_sm": 132
     },
-    "R100": {
-        "fp64": 9.7*3.0, "fp64_tensor": 19.5*3.0, "fp32": 19.5*6.0, "fp32_tensor": 156*6.0, "fp16": 78*3.0, "fp16_tensor": 312*3.0, 
-        "mem_bw": 1555*8.0, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
-    },
-    "R100-UNI": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*8.0, "fp32_tensor": 156*8.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
-        "mem_bw": 1555*1.5, "pcie_bw": 64*25.0, "nvlink_bw": 600*6.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
-    },
-    "GPU-M-IO-A-H14": {
-        "fp64": 9.7*1.0, "fp64_tensor": 19.5*1.0, "fp32": 19.5*1.0, "fp32_tensor": 156*1.0, "fp16": 78*1.0, "fp16_tensor": 312*1.0, 
-        "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 1.0, "alpha_cpu": 3.0,
-    },
-    "GPU-F-IO-A-H14": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "fp32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
-        "mem_bw": 1555*1.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
-    },
-    "GPU-M-IO-A-H22": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
-        "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
-    },
-    "GPU-F-IO-A-H22": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
-        "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
-    },
-    "GPU-M-IO-A-H24": {
-        "fp64": 9.7*2.0, "fp64_tensor": 19.5*2.0, "fp32": 19.5*2.0, "fp32_tensor": 156*2.0, "fp16": 78*2.0, "fp16_tensor": 312*2.0, 
-        "mem_bw": 1555*4.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 2.0, "alpha_cpu": 3.0,
-    },
-    "GPU-F-IO-A-H24": {
-        "fp64": 9.7*4.0, "fp64_tensor": 19.5*4.0, "fp32": 19.5*4.0, "tf32_tensor": 156*4.0, "fp16": 78*4.0, "fp16_tensor": 312*4.0, 
-        "mem_bw": 1555*2.0, "pcie_bw": 64*4.0, "nvlink_bw": 600*4.0, "alpha_gpu": 4.0, "alpha_cpu": 3.0,
+    "H100-NVL": {
+        "fp64": 30, "tf64": 60, "fp32": 60, "tf32": 835, "fp16": 133.8, "tf16": 1671, 
+        "mem_bw": 3900, "pcie_bw": 128, "nvlink_bw": 600, 
+        "base_clock": 1080, "boost_clock": 1785, "mem_clock": 1593,
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 228, "uni_cache_sm": 256,
+        "num_sm": 114
     }
 }
 
-HOST_SPECS = {
-    "Perlmutter": {
-        "cores": 64, "threads": 128, "base_clock": 2.45, "boost_clock": 3.5, "mem_bw": 3200
-    },
-    "Einsteinium": {
-        "cores": 56, "threads": 112, "base_clock": 2.0, "boost_clock": 3.8, "mem_bw": 4800
-    },
-    "Eos": {
-        "cores": 56, "threads": 112, "base_clock": 2.0, "boost_clock": 3.8, "mem_bw": 4800
-    }
-}
 
-# Mapping from metric names to GPU spec keys
-metric_ref_mappings = {
-    'TENSO': 'ref_fp64_tensor',
-    'FP64A': 'ref_fp64',
-    'FP32A': 'ref_fp32',
-    'FP16A': 'ref_fp16'
-}
-
-metric_target_mappings = {
-    'TENSO': 'target_fp64_tensor',
-    'FP64A': 'target_fp64',
-    'FP32A': 'target_fp32',
-    'FP16A': 'target_fp16'
-}
-
-prec_ref_mappings = {
-    'tf64': 'ref_fp64_tensor',
-    'fp64': 'ref_fp64',
-    'tf32': 'ref_fp32_tensor',
-    'fp32': 'ref_fp32',
-    'tf16': 'ref_fp16_tensor'
-}
-
-prec_target_mappings = {
-    'tf64': 'target_fp64_tensor',
-    'fp64': 'target_fp64',
-    'tf32': 'target_fp32_tensor',
-    'fp32': 'target_fp32',
-    'tf16': 'target_fp16_tensor'
-}
-
-def get_gpu_specs(gpu_arch, prefix):
-    """Get GPU specifications with appropriate prefix."""
-    try:
-        specs = GPU_SPECS.get(gpu_arch)
-        return {f"{prefix}_{key}": value for key, value in specs.items()}
-    except KeyError:
-        print("GPU architect is not found in GPU SPEC DICT")
-
-# Define a custom argument type for a list of strings
-def list_of_strings(arg):
-    return arg.split(',')
-
-def is_number(value):
-    try:
-        float(value)
-        return True
-    except ValueError:
-        return False
-
-# Function to read the file and process the data
-def process_single_file(num_gpu, file_path, metric_names):
-    # Initialize a dict to hold data lists for each GPU
-    gpu_data = dict()
-
-    column_mapping = {}
-    header_parsed = False
-
-    header_pattern = re.compile(r'^#Entity')
+@dataclass
+class GPU:
+    """Encapsulates GPU specifications"""
+    name: str
+    specs: Dict[str, float]
     
-    # Compile regex patterns for all GPU prefixes
-    # gpu_patterns = [re.compile(rf'^GPU {i}\s') for i in range(num_gpu)]
+    def __init__(self, gpu_name: str):
+        self.name = gpu_name
+        self.specs = GPUSpec.get(gpu_name)
 
-    # Read the file
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
-        for line in lines:
-            # Process header information
-            if header_pattern.match(line) and not header_parsed:
-                header_parts = re.split(r'\s{2,}', line.strip())
-                # Remove the '#Entity' part and 'ID' if present
-                columns = [col for col in header_parts if col not in ['#Entity', 'ID']]
-                
-                # Create mapping from metric name to column index
-                for i, col_name in enumerate(columns):
-                    column_mapping[col_name] = i
+    def get_name(self) -> str:
+        return self.name
 
-                # Verify all requested metrics are present
-                missing_metrics = []
-                for metric in metric_names:
-                    if metric not in column_mapping:
-                        missing_metrics.append(metric)
-
-                if missing_metrics:
-                    raise ValueError(f"Missing metrics in data file: {missing_metrics}")
-                        
-                header_parsed = True
-                continue
-        
-            # Process GPU data lines
-            if line.startswith('GPU'):
-                # Split the line by three or more spaces
-                parts = re.split(r'\s{3,}', line.strip())
-
-                # Extract GPU number
-                gpu_match = re.search(r'GPU (\d+)', parts[0])
-                if not gpu_match:
-                    raise ValueError("Cannot extract GPU ID")
-
-                gpu_id = int(gpu_match.group(1))
-
-                if gpu_id not in gpu_data:
-                    gpu_data[gpu_id] = []
-
-                # Extract data values (skip the GPU identifier)
-                data_values = parts[1:]
-
-                # Convert to numeric and extract only requested metrics in specified order
-                try:
-                    numeric_values = [float(x) for x in data_values]
-                    
-                    # Extract requested metrics in the order specified by user
-                    selected_metrics = []
-                    for metric in metric_names:
-                        col_idx = column_mapping[metric]
-                        if col_idx < len(numeric_values):
-                            selected_metrics.append(numeric_values[col_idx])
-                        else:
-                            raise ValueError(f"Column index {col_idx} for metric {metric} out of range")
-                        
-                    gpu_data[gpu_id].append(selected_metrics)
-                    
-                except (ValueError, IndexError) as e:
-                    print(f"Warning: Could not parse line: {line}")
-                    print(f"Error: {e}")
-                    continue
+    def get_specs(self, key: str, default: float = 0.0) -> float:
+        """Safe getter for spec values"""
+        return self.specs.get(key, default)
     
-    # Create DataFrames with the requested metrics as columns
-    gpu_dfs = []
-    for gpu_id in sorted(gpu_data.keys()):
-        if gpu_data[gpu_id]:
-            df = pd.DataFrame(gpu_data[gpu_id], columns=metric_names)
-            gpu_dfs.append(df)
-        else:
-            # Create empty DataFrame with correct columns if no data
-            gpu_dfs.append(pd.DataFrame(columns=metric_names))
-     
-    # returns a list of DataFrames, one per GPU
-    return gpu_dfs  
-
-
-def organize_by_file_content(all_files, num_gpu): 
-    file_info = []
+    def __getitem__(self, key: str) -> float:
+        """Allow dictionary-style access"""
+        return self.specs[key]
     
-    for file_path in all_files:
+
+class MetricsProcessor:
+    """Handles metrics file processing for single or multiple GPUs"""
+    GPU_PATTERN = re.compile(r'^GPU \d+\s')
+    HEADER_PATTERN = re.compile(r'^#Entity')
+
+    def __init__(self, num_gpu: int, metric_names: List[str]):
+        self.num_gpu = num_gpu
+        self.metric_names = metric_names
+
+    @staticmethod
+    def is_float(value: str) -> bool:
+        """Check if a string can be converted to float"""
         try:
-            with open(file_path, 'r') as f:
-                # Read first few lines to find GPU information
-                content = ""
-                for i, line in enumerate(f):
-                    content += line
-                    if i > 10:  # Only read first 50 lines for efficiency
-                        break
-                    
-            # Count occurrences of different GPU IDs
-            gpu_pattern = re.compile(r'GPU (\d+)')
-            gpu_matches = gpu_pattern.findall(content)
-            
-            if gpu_matches:
-                # Find the most common GPU ID in this file
-                gpu_counter = Counter(gpu_matches)
-                most_common_gpu_id = int(gpu_counter.most_common(1)[0][0])
-                total_lines = len(gpu_matches)
-                
-                file_info.append((file_path, most_common_gpu_id, total_lines))
-            else:
-                print(f"Warning: No GPU data found in {file_path}")
-                # Still include the file but with unknown GPU ID
-                file_info.append((file_path, -1, 0))
-                
-        except Exception as e:
-            print(f"Warning: Could not read file {file_path}: {e}")
-            # Include the file anyway
-            file_info.append((file_path, -1, 0))
-    
-    # Sort files by filename to ensure consistent ordering
-    # This gives us a deterministic order regardless of filesystem order
-    file_info.sort(key=lambda x: x[0].name)
+            float(value)
+            return True
+        except ValueError:
+            return False
 
-    if len(file_info) != num_gpu:
-        print(f"Content-based matching found {len(file_info)} valid files, expected {num_gpu}.")
-        return None
-    
-    # Sort by node_id, then by gpu_id
-    file_info.sort(key=lambda x: (x[1], x[2]))
-    
-    # Assign logical GPU IDs based on file order
-    organized_files = [str(info[0]) for info in file_info]
-    
-    print("File organization by content analysis (order-based):")
-    for logical_gpu_id, (file_path, detected_gpu_id, line_count) in enumerate(file_info):
-        if detected_gpu_id >= 0:
-            print(f"  Logical GPU {logical_gpu_id}: {file_path.name} (detected GPU {detected_gpu_id}, {line_count} data lines)")
+    def process_files(self, dcgm_input: str) -> List[pd.DataFrame]:
+        """Process input files or directory"""
+        if os.path.isdir(dcgm_input):
+            print(f"Processing folder: {dcgm_input}")
+            file_paths = self._scan_and_organize_gpu_files(dcgm_input)
+            return self._process_multiple_files(file_paths)
+        elif os.path.isfile(dcgm_input):
+            print(f"Processing single file with {self.num_gpu} GPUs: {dcgm_input}")
+            return self._process_single_file(dcgm_input)
         else:
-            print(f"  Logical GPU {logical_gpu_id}: {file_path.name} (GPU ID unknown, {line_count} data lines)")
-    
-    return organized_files
+            raise ValueError(f"Input path '{dcgm_input}' is neither a valid file nor a directory")
 
-
-def process_multiple_files_single_gpu(file_paths, metric_names):
-    '''
-    multiple files each file contain data of a single gpu
-    '''
-    gpu_dfs = []
-    
-    for logical_gpu_id, file_path in enumerate(file_paths):
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-            
-        gpu_data = []
-        column_mapping = {}
-        header_parsed = False
-        header_pattern = re.compile(r'^#Entity')
-        
-        print(f"Processing file {file_path} as logical GPU {logical_gpu_id}")
-        
+    def _process_single_file(self, file_path: str) -> List[pd.DataFrame]:
+        """Process a single file containing multiple GPU data"""
         with open(file_path, 'r') as file:
             lines = file.readlines()
-            for line in lines:
-                # Process header information
-                if header_pattern.match(line) and not header_parsed:
-                    header_parts = re.split(r'\s{2,}', line.strip())
-                    # Remove the '#Entity' part and 'ID' if present
-                    columns = [col for col in header_parts if col not in ['#Entity', 'ID']]
-                    
-                    # Create mapping from metric name to column index
-                    for j, col_name in enumerate(columns):
-                        column_mapping[col_name] = j
-
-                    # Verify all requested metrics are present
-                    missing_metrics = []
-                    for metric in metric_names:
-                        if metric not in column_mapping:
-                            missing_metrics.append(metric)
-
-                    if missing_metrics:
-                        raise ValueError(f"Missing metrics in data file {file_path}: {missing_metrics}")
-                            
-                    header_parsed = True
-                    continue
-            
-                # Process ALL GPU data lines (regardless of the GPU ID mentioned in the line)
-                if line.startswith('GPU'):
-                    # Split the line by three or more spaces
-                    parts = re.split(r'\s{3,}', line.strip())
-
-                    # Extract data values (skip the GPU identifier)
-                    # We ignore the actual GPU ID in the line since this file represents one logical GPU
-                    data_values = parts[1:]
-
-                    # Convert to numeric and extract only requested metrics in specified order
-                    try:
-                        numeric_values = [0.0 if x.strip().lower() == 'n/a' else float(x) for x in data_values]
-                        
-                        # Extract requested metrics in the order specified by user
-                        selected_metrics = []
-                        for metric in metric_names:
-                            col_idx = column_mapping[metric]
-                            if col_idx < len(numeric_values):
-                                selected_metrics.append(numeric_values[col_idx])
-                            else:
-                                raise ValueError(f"Column index {col_idx} for metric {metric} out of range")
-                            
-                        gpu_data.append(selected_metrics)
-                        
-                    except (ValueError, IndexError) as e:
-                        print(f"Warning: Could not parse line in {file_path}: {line}")
-                        print(f"Error: {e}")
-                        continue
         
-        # Create DataFrame for this logical GPU
-        if gpu_data:
-            df = pd.DataFrame(gpu_data, columns=metric_names)
-            gpu_dfs.append(df)
-            print(f"Logical GPU {logical_gpu_id}: Created DataFrame with {len(gpu_data)} rows")
-        else:
-            # Create empty DataFrame with correct columns if no data
-            gpu_dfs.append(pd.DataFrame(columns=metric_names))
-            print(f"Warning: No data found for logical GPU {logical_gpu_id} in file {file_path}")
-    
-    return gpu_dfs
+        header_columns, metric_indices = self._parse_header(lines)
+        gpu_data = self._extract_multi_gpu_data(lines, metric_indices, len(header_columns))
+        
+        return self._create_dataframes(gpu_data)
 
+    def _process_multiple_files(self, file_paths: List[str]) -> List[pd.DataFrame]:
+        """Process multiple files, each containing single GPU data"""
+        gpu_dfs = []
+        
+        for logical_gpu_id, file_path in enumerate(file_paths):
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+            
+            print(f"Processing file {file_path} as logical GPU {logical_gpu_id}")
+            
+            with open(file_path, 'r') as file:
+                lines = file.readlines()
+            
+            header_columns, metric_indices = self._parse_header(lines)
+            gpu_data = self._extract_single_gpu_data(lines, metric_indices, len(header_columns))
+            
+            if gpu_data:
+                df = pd.DataFrame(gpu_data, columns=self.metric_names)
+                gpu_dfs.append(df)
+                print(f"Logical GPU {logical_gpu_id}: Created DataFrame with {len(gpu_data)} rows")
+            else:
+                gpu_dfs.append(pd.DataFrame(columns=self.metric_names))
+                print(f"Warning: No data found for logical GPU {logical_gpu_id} in file {file_path}")
+        
+        return gpu_dfs
 
-def scan_and_organize_gpu_files(folder_path, num_gpu):
-    """
-    Scan a folder for GPU data files and organize them by logical GPU ID.
-    
-    Args:
-        folder_path: Path to folder containing GPU data files
-        num_gpu: Expected total number of GPUs
-    
-    Returns:
-        List of file paths ordered by logical GPU ID
-    """
-    folder_path = Path(folder_path)
-    if not folder_path.exists():
-        raise FileNotFoundError(f"Folder not found: {folder_path}")
-    
-    # Find all potential GPU data files (adjust extensions as needed)
-    file_patterns = ['*.out']
-    all_files = []
-    for pattern in file_patterns:
-        all_files.extend(folder_path.glob(pattern))
-    
-    if not all_files:
-        raise FileNotFoundError(f"No data files found in {folder_path}")
-    
-    print(f"Found {len(all_files)} potential GPU data files in {folder_path}")
+    def _parse_header(self, lines: List[str]) -> Tuple[List[str], List[int]]:
+        """Parse header and find metric column indices"""
+        for line in lines:
+            if self.HEADER_PATTERN.match(line):
+                header_columns = [col.strip() for col in re.split(r'\s{2,}', line.strip())]
+                metric_indices = self._get_metric_indices(header_columns)
+                return header_columns, metric_indices
+        raise ValueError("Could not find header line in the data file")
 
-    organized_files = organize_by_file_content(all_files, num_gpu)
-    if organized_files:
+    def _get_metric_indices(self, header_columns: List[str]) -> List[int]:
+        """Map requested metrics to their column indices"""
+        metric_indices = []
+        for metric in self.metric_names:
+            if metric not in header_columns:
+                raise ValueError(
+                    f"Metric '{metric}' not found in data file. "
+                    f"Available metrics: {header_columns[1:]}"
+                )
+            metric_indices.append(header_columns.index(metric) - 1)
+        return metric_indices
+
+    def _extract_multi_gpu_data(self, lines: List[str], metric_indices: List[int], 
+                                num_columns: int) -> Dict[int, List[List[float]]]:
+        """Extract data from a file with multiple GPUs"""
+        gpu_data = {}
+        
+        for line in lines:
+            if self.HEADER_PATTERN.match(line):
+                continue
+            if self.GPU_PATTERN.match(line):
+                parts = re.split(r'\s{3,}', line.strip())
+                
+                # Extract GPU ID
+                gpu_match = re.search(r'GPU (\d+)', parts[0])
+                if not gpu_match:
+                    continue
+                
+                gpu_id = int(gpu_match.group(1))
+                
+                # Extract numeric values
+                values = parts[1:]
+                numeric_values = [0.0 if v.strip().lower() == 'n/a' else float(v) 
+                                for v in values if self.is_float(v) or v.strip().lower() == 'n/a']
+                
+                if len(numeric_values) >= num_columns - 1:
+                    selected_values = [numeric_values[i] for i in metric_indices]
+                    
+                    if gpu_id not in gpu_data:
+                        gpu_data[gpu_id] = []
+                    gpu_data[gpu_id].append(selected_values)
+                else:
+                    print(f"Warning: Line has insufficient data columns: {line.strip()}")
+        
+        return gpu_data
+
+    def _extract_single_gpu_data(self, lines: List[str], metric_indices: List[int], 
+                                 num_columns: int) -> List[List[float]]:
+        """Extract data from a file with single GPU (all GPU lines are for same logical GPU)"""
+        gpu_data = []
+        
+        for line in lines:
+            if self.HEADER_PATTERN.match(line):
+                continue
+            if self.GPU_PATTERN.match(line):
+                parts = re.split(r'\s{3,}', line.strip())
+                values = parts[1:]
+                numeric_values = [0.0 if v.strip().lower() == 'n/a' else float(v) 
+                                for v in values if self.is_float(v) or v.strip().lower() == 'n/a']
+                
+                if len(numeric_values) >= num_columns - 1:
+                    selected_values = [numeric_values[i] for i in metric_indices]
+                    gpu_data.append(selected_values)
+                else:
+                    print(f"Warning: Line has insufficient data columns: {line.strip()}")
+        
+        return gpu_data
+
+    def _create_dataframes(self, gpu_data: Dict[int, List[List[float]]]) -> List[pd.DataFrame]:
+        """Create DataFrames from GPU data dictionary"""
+        gpu_dfs = []
+        for gpu_id in sorted(gpu_data.keys()):
+            if gpu_data[gpu_id]:
+                df = pd.DataFrame(gpu_data[gpu_id], columns=self.metric_names)
+                gpu_dfs.append(df)
+            else:
+                gpu_dfs.append(pd.DataFrame(columns=self.metric_names))
+        
+        return gpu_dfs
+
+    def _scan_and_organize_gpu_files(self, folder_path: str) -> List[str]:
+        """Scan a folder for GPU data files and organize them by logical GPU ID"""
+        folder_path = Path(folder_path)
+        if not folder_path.exists():
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+        
+        file_patterns = ['*.out', '*.txt']
+        all_files = []
+        for pattern in file_patterns:
+            all_files.extend(folder_path.glob(pattern))
+        
+        if not all_files:
+            raise FileNotFoundError(f"No data files found in {folder_path}")
+        
+        print(f"Found {len(all_files)} potential GPU data files in {folder_path}")
+        
+        return self._organize_by_file_content(all_files)
+
+    def _organize_by_file_content(self, all_files: List[Path]) -> List[str]:
+        """Organize files by analyzing their content"""
+        file_info = []
+        
+        for file_path in all_files:
+            try:
+                with open(file_path, 'r') as f:
+                    content = ""
+                    for i, line in enumerate(f):
+                        content += line
+                        if i > 10:
+                            break
+                
+                gpu_pattern = re.compile(r'GPU (\d+)')
+                gpu_matches = gpu_pattern.findall(content)
+                
+                if gpu_matches:
+                    gpu_counter = Counter(gpu_matches)
+                    most_common_gpu_id = int(gpu_counter.most_common(1)[0][0])
+                    total_lines = len(gpu_matches)
+                    file_info.append((file_path, most_common_gpu_id, total_lines))
+                else:
+                    print(f"Warning: No GPU data found in {file_path}")
+                    file_info.append((file_path, -1, 0))
+            
+            except Exception as e:
+                print(f"Warning: Could not read file {file_path}: {e}")
+                file_info.append((file_path, -1, 0))
+        
+        # Sort by filename for deterministic ordering
+        file_info.sort(key=lambda x: x[0].name)
+        
+        if len(file_info) != self.num_gpu:
+            print(f"Content-based matching found {len(file_info)} valid files, expected {self.num_gpu}.")
+            raise ValueError(f"Expected {self.num_gpu} files but found {len(file_info)}")
+        
+        # Sort by GPU ID and line count
+        file_info.sort(key=lambda x: (x[1], x[2]))
+        
+        organized_files = [str(info[0]) for info in file_info]
+        
+        print("File organization by content analysis:")
+        for logical_gpu_id, (file_path, detected_gpu_id, line_count) in enumerate(file_info):
+            if detected_gpu_id >= 0:
+                print(f"  Logical GPU {logical_gpu_id}: {file_path.name} "
+                      f"(detected GPU {detected_gpu_id}, {line_count} data lines)")
+            else:
+                print(f"  Logical GPU {logical_gpu_id}: {file_path.name} "
+                      f"(GPU ID unknown, {line_count} data lines)")
+        
         return organized_files
 
 
-# Update the wrapper function to handle folder input
-def process_files(num_gpu, dcgm_input, metric_names):
-    if os.path.isdir(dcgm_input):
-        print(f"Processing folder: {dcgm_input}")
-        file_paths = scan_and_organize_gpu_files(dcgm_input, num_gpu)
-        profiled_df = process_multiple_files_single_gpu(file_paths, metric_names)
-    elif os.path.isfile(dcgm_input):
-        print(f"Processing single file with {num_gpu} GPUs: {dcgm_input}")
-        profiled_df = process_single_file(num_gpu, dcgm_input, metric_names)
-    else:
-        raise ValueError(f"Input path '{dcgm_input}' is neither a valid file nor a directory")
-
-    return profiled_df
-
-
-def perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, hw_pcie_gb, hw_nvlink_gb):
-    t_total_list = list()
-    sample_intv = sample_interval_ms / 1000
-
-    for row in df.itertuples(index=False, name='MetricRow'):
-        # row is a namedtuple, you can access columns via row.<colname>
-        # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
-        # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
-        metric_values = list(getattr(row, metric) for metric in metrics)
-        
-        t_flop = sample_intv * (metric_values[metrics.index('TENSO')] + 
-                                metric_values[metrics.index('FP64A')] + 
-                                metric_values[metrics.index('FP32A')] + 
-                                metric_values[metrics.index('FP16A')])  
-        t_dram = sample_intv * metric_values[metrics.index('DRAMA')]
-        
-        t_roofline = max(t_flop, t_dram)
-        
-        t_otherGPU = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline)
-
-        t_pcie = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * hw_pcie_gb) 
-
-        t_nvlink = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * hw_nvlink_gb)
-
-        t_otherNode = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie - t_nvlink)
-
-        t_total = t_roofline + t_otherGPU + t_pcie + t_nvlink + t_otherNode
-
-        t_total_list.append(t_total)
+@dataclass
+class MetricValues:
+    """Container for extracted metric values from a row"""
+    gract: float = 0.0
+    drama: float = 0.0
+    tenso: float = 0.0
+    fp64a: float = 0.0
+    fp32a: float = 0.0
+    fp16a: float = 0.0
+    smocc: float = 0.0
+    pcitx: float = 0.0
+    pcirx: float = 0.0
+    nvltx: float = 0.0
+    nvlrx: float = 0.0
     
-    if finish_idx < len(t_total_list):
-        t_total_list_finish = t_total_list[:finish_idx]
-    else:
-        t_total_list_finish = t_total_list
-
-    if start_ts is not None or end_ts is not None:
-        start_idx = 0
-        end_idx = len(t_total_list_finish)
-
-        if start_ts is not None:
-            start_idx = max(0, int(start_ts / sample_interval_ms))
-        
-        if end_ts is not None:
-            end_idx = min(len(t_total_list_finish), int(end_ts / sample_interval_ms))
-        
-        if start_idx < end_idx:
-            t_total_list_slice = t_total_list_finish[start_idx:end_idx]
-        else:
-            t_total_list_slice = []
-            raise ValueError("End Timestamp is earlier than Start Timestamp")
-
-        return t_total_list_slice
-
-    return t_total_list_finish
-
-
-def perf_modeling(gpu_dfs, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, gpu_arch):
-    finish_idx = int(overall_runtime_ms / sample_interval_ms)
+    @classmethod
+    def from_row(cls, row, metrics: List[str]) -> 'MetricValues':
+        """Create MetricValues from a dataframe row"""
+        return cls(
+            gract=getattr(row, 'GRACT', 0.0) if 'GRACT' in metrics else 0.0,
+            drama=getattr(row, 'DRAMA', 0.0) if 'DRAMA' in metrics else 0.0,
+            tenso=getattr(row, 'TENSO', 0.0) if 'TENSO' in metrics else 0.0,
+            fp64a=getattr(row, 'FP64A', 0.0) if 'FP64A' in metrics else 0.0,
+            fp32a=getattr(row, 'FP32A', 0.0) if 'FP32A' in metrics else 0.0,
+            fp16a=getattr(row, 'FP16A', 0.0) if 'FP16A' in metrics else 0.0,
+            smocc=getattr(row, 'SMOCC', 0.0) if 'SMOCC' in metrics else 0.0,
+            pcitx=getattr(row, 'PCITX', 0.0) if 'PCITX' in metrics else 0.0,
+            pcirx=getattr(row, 'PCIRX', 0.0) if 'PCIRX' in metrics else 0.0,
+            nvltx=getattr(row, 'NVLTX', 0.0) if 'NVLTX' in metrics else 0.0,
+            nvlrx=getattr(row, 'NVLRX', 0.0) if 'NVLRX' in metrics else 0.0,
+        )
     
-    ref_gpu_spec = get_gpu_specs(gpu_arch, "ref")
+    def get_flop_sum(self) -> float:
+        """Sum of all FLOP-related metrics"""
+        return self.tenso + self.fp64a + self.fp32a + self.fp16a
 
-    t_total_dict = dict()
-    for i, df in enumerate(gpu_dfs):
-        if not df.empty:
-            t_totals = perf_modeling_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, ref_gpu_spec["ref_pcie_bw"], ref_gpu_spec["ref_nvlink_bw"])
-            t_total_dict[f"GPU{i}"] = t_totals
-        else:
-            raise ValueError("The total time list is empty")
 
-    # Now compute the max for each row index
-    # First, check that all lists are of the same length
-    lengths = [len(lst) for lst in t_total_dict.values()]
-    if len(set(lengths)) != 1:
-        raise ValueError("Not all GPU t_total lists are of the same length!")
+@dataclass
+class TimeComponents:
+    """Container for calculated time components"""
+    t_flop: float = 0.0
+    t_dram: float = 0.0
+    t_kernel: float = 0.0
+    t_pcie: float = 0.0
+    t_nvlink: float = 0.0
+    t_othernode: float = 0.0
     
-    num_rows = lengths[0]
-    # Aggregate every `agg_samples` samples
-    # When agg_interval_ms == sample_interval_ms, aggregation is on a row basis
-    agg_samples = agg_interval_ms // sample_interval_ms
-
-    # Transpose the lists and take max of every `agg_samples` samples
-    max_list = []
-    
-    for start in range(0, num_rows, agg_samples):
-        end = min(start + agg_samples, num_rows)
-        # For each row in this window, find the max across GPUs, then find the max in the window
-        agg_time_gpus = {
-            gpu: sum(t_total_dict[gpu][row_idx] for row_idx in range(start, end))
-            for gpu in t_total_dict
+    def to_dict(self) -> Dict[str, float]:
+        """Convert to dictionary"""
+        return {
+            't_flop': self.t_flop,
+            't_dram': self.t_dram,
+            't_kernel': self.t_kernel,
+            't_pcie': self.t_pcie,
+            't_nvlink': self.t_nvlink,
+            't_othernode': self.t_othernode
         }
-        window_max = max(agg_time_gpus.values())
-        max_list.append(window_max)
-
-    print(f"Estimate Runtime On Reference Hardware: {sum(max_list):.2f}")
 
 
-def check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target):
-    balance_ref = ref_gpu_spec['ref_fp64'] * 1000 / ref_gpu_spec['ref_mem_bw']
-
-    balance_target = target_gpu_spec['target_fp64'] * 1000 / target_gpu_spec['target_mem_bw']
-
-    if t_dram_ref != 0:
-        t_intensity_ref = t_flop_ref * ref_gpu_spec['ref_fp64'] * 1000 / (t_dram_ref * ref_gpu_spec['ref_mem_bw'])
-    else:
-        t_intensity_ref = float('-inf')
-
-    if t_dram_target != 0:
-        t_intensity_target = t_flop_target * target_gpu_spec['target_fp64'] * 1000 / (t_dram_target * target_gpu_spec['target_mem_bw'])
-    else:
-        t_intensity_target = float('-inf')
+@dataclass
+class TimeSlice:
+    """Container for time-based metrics with slicing functionality"""
+    start_idx: int = 0
+    end_idx: Optional[int] = None
     
-    bound_ref = "compute" if t_intensity_ref > balance_ref else "memory"
-    bound_target = "compute" if t_intensity_target > balance_target else "memory"
+    def slice_list(self, data: List) -> List:
+        """Apply slicing to a list"""
+        return data[self.start_idx:self.end_idx]
     
-    return bound_ref, bound_target
+    def slice_dict(self, data: Dict[str, List]) -> Dict[str, List]:
+        """Apply slicing to all lists in a dictionary"""
+        return {
+            key: values[self.start_idx:self.end_idx]
+            for key, values in data.items()
+        }
 
 
-def pref_predict_per_gpu(df, metrics, finish_idx, sample_interval_ms, start_ts, end_ts, ref_gpu_spec, target_gpu_spec, precision, flop_util_bound_switch, mem_util_bound_switch):    
+class TimeCalculator:
+    """Handles time-related calculations"""
     
-    t_total_overlap_target_list = list()
-    t_total_sequential_target_list = list()
-    t_total_switch_target_list = list()
-
-    drama_ref_list = list()
-    tensor_ref_list = list()
-    fp64a_ref_list = list()
-    fp32a_ref_list = list()
-    fp16a_ref_list = list()
-
-    sample_intv = sample_interval_ms / 1000
-
-    for row in df.itertuples(index=False, name='MetricRow'):
-        # row is a namedtuple, you can access columns via row.<colname>
-        # For example, if your metric_names are ["GPUTL", "SMACT", "TENSO"]
-        # you can access row.GPUTL, row.SMACT, row.TENSO, etc.
-        metric_values = list(getattr(row, metric) for metric in metrics)
+    def __init__(self, sample_interval_ms: float, gpu: GPU):
+        self.sample_intv = sample_interval_ms / 1000
+        self.gpu = gpu
+    
+    def calc_components(self, metrics: MetricValues) -> TimeComponents:
+        """Calculate time components from metrics"""
+        t_flop = self.sample_intv * metrics.get_flop_sum()
+        t_dram = self.sample_intv * metrics.drama
+        t_kernel = self.sample_intv * metrics.gract
         
-        # Find the largest value among FLOP metrics and get its name
-        flop_metrics = ['TENSO', 'FP64A', 'FP32A', 'FP16A']
-        max_metric_name = max(flop_metrics, key=lambda x: metric_values[metrics.index(x)])
-        max_flop_value = metric_values[metrics.index(max_metric_name)]
-
-        t_flop_ref = sample_intv * (metric_values[metrics.index('TENSO')] + 
-                                    metric_values[metrics.index('FP64A')] + 
-                                    metric_values[metrics.index('FP32A')] + 
-                                    metric_values[metrics.index('FP16A')])  
-        tensor_ref_list.append(metric_values[metrics.index('TENSO')])
-        fp64a_ref_list.append(metric_values[metrics.index('FP64A')])
-        fp32a_ref_list.append(metric_values[metrics.index('FP32A')])
-        fp16a_ref_list.append(metric_values[metrics.index('FP16A')])
-
-        t_dram_ref = sample_intv * metric_values[metrics.index('DRAMA')]
-        drama_ref_list.append(metric_values[metrics.index('DRAMA')])
-
-        t_roofline_ref_overlap = max(t_flop_ref, t_dram_ref)
+        t_pcie = ((metrics.pcitx + metrics.pcirx) * self.sample_intv / 
+                  (1e9 * self.gpu.get_specs("pcie_bw")))
         
-        t_roofline_ref_sequential = t_flop_ref + t_dram_ref
-
-        t_otherGPU_ref_overlap = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref_overlap)
-
-        t_otherGPU_ref_sequential = max(0, sample_intv * metric_values[metrics.index('GRACT')] - t_roofline_ref_sequential)
+        t_nvlink = ((metrics.nvltx + metrics.nvlrx) * self.sample_intv / 
+                    (1e9 * self.gpu.get_specs("nvlink_bw")))
         
-        t_pcie_ref = (metric_values[metrics.index('PCITX')] + metric_values[metrics.index('PCIRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_pcie_bw"]) 
+        t_othernode = max(self.sample_intv * (1 - metrics.gract) - t_pcie - t_nvlink, 0)
         
-        t_nvlink_ref = (metric_values[metrics.index('NVLTX')] + metric_values[metrics.index('NVLRX')]) * sample_intv / (1000 * 1000 * 1000 * ref_gpu_spec["ref_nvlink_bw"])
-        
-        t_otherNode_ref = max(0, sample_intv * (1 - metric_values[metrics.index('GRACT')]) - t_pcie_ref - t_nvlink_ref)
-
-        t_flop_target = sample_intv * (metric_values[metrics.index('TENSO')] * (ref_gpu_spec[prec_ref_mappings[precision]] / target_gpu_spec[prec_target_mappings[precision]]) +
-                                       metric_values[metrics.index('FP64A')] * (ref_gpu_spec["ref_fp64"] / target_gpu_spec["target_fp64"]) + 
-                                       metric_values[metrics.index('FP32A')] * (ref_gpu_spec["ref_fp32"] / target_gpu_spec["target_fp32"]) + 
-                                       metric_values[metrics.index('FP16A')] * (ref_gpu_spec["ref_fp16"] / target_gpu_spec["target_fp16"]))
-        t_dram_target = sample_intv * metric_values[metrics.index('DRAMA')] * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
-
-        t_roofline_target_overlap = max(t_flop_target, t_dram_target)
-        
-        t_roofline_target_sequential = t_flop_target + t_dram_target
-        
-        bound_ref, bound_target = check_bound_switch(ref_gpu_spec, target_gpu_spec, t_flop_ref, t_dram_ref, t_flop_target, t_dram_target)
-
-        if bound_ref == bound_target:
-            pass
-        elif bound_ref != bound_target and bound_target == "memory":
-            print("compute-bound switch to memory-bound")
-            # t_dram_target = t_dram_target * mem_util_bound_switch
-            t_dram_target = sample_intv * mem_util_bound_switch * (ref_gpu_spec["ref_mem_bw"] / target_gpu_spec["target_mem_bw"])
-        elif bound_ref != bound_target and bound_target == "compute":
-            print("memory-bound switch to compute-bound")
-            # t_flop_target = t_flop_target * flop_util_bound_switch
-            t_flop_target = sample_intv * flop_util_bound_switch * (ref_gpu_spec[metric_ref_mappings[max_metric_name]] / target_gpu_spec[metric_target_mappings[max_metric_name]])
-        else:
-            raise ValueError("Impossible Error")
-        
-        t_roofline_target_switch = max(t_flop_target, t_dram_target)
-        
-        if "target_alpha_gpu" in target_gpu_spec:
-            t_otherGPU_target_overlap = t_otherGPU_ref_overlap * (1 / target_gpu_spec["target_alpha_gpu"])
-            t_otherGPU_target_sequential = t_otherGPU_ref_sequential * (1 / target_gpu_spec["target_alpha_gpu"])
-        else:
-            t_otherGPU_target_overlap = t_otherGPU_ref_overlap * (ref_gpu_spec["ref_base_clock"] / target_gpu_spec["target_base_clock"]) * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"])
-            t_otherGPU_target_sequential = t_otherGPU_ref_sequential * (ref_gpu_spec["ref_base_clock"] / target_gpu_spec["target_base_clock"]) * (ref_gpu_spec["ref_num_streams"] / target_gpu_spec["target_num_streams"])
-
-        t_pcie_target = t_pcie_ref * (ref_gpu_spec["ref_pcie_bw"] / target_gpu_spec["target_pcie_bw"])
-        
-        t_nvlink_target = t_nvlink_ref * (ref_gpu_spec["ref_nvlink_bw"] / target_gpu_spec["target_nvlink_bw"])
-        
-        if "target_alpha_gpu" in target_gpu_spec:
-            t_otherNode_target = t_otherNode_ref * (1 / target_gpu_spec["target_alpha_cpu"])
-        else:
-            t_otherNode_target = t_otherNode_ref
-
-        t_total_target_overlap = t_roofline_target_overlap + t_otherGPU_target_overlap + t_pcie_target + t_nvlink_target + t_otherNode_target
-
-        t_total_target_sequential = t_roofline_target_sequential + t_otherGPU_target_sequential + t_pcie_target + t_nvlink_target + t_otherNode_target
-
-        t_total_target_switch = t_roofline_target_switch + t_otherGPU_target_overlap + t_pcie_target + t_nvlink_target + t_otherNode_target
-
-        t_total_overlap_target_list.append(t_total_target_overlap) 
-
-        t_total_sequential_target_list.append(t_total_target_sequential)    
-
-        t_total_switch_target_list.append(t_total_target_switch)
-
-    if finish_idx < len(t_total_overlap_target_list):
-        t_total_overlap_target_list_finish = t_total_overlap_target_list[:finish_idx]
-        t_total_sequential_target_list_finish = t_total_sequential_target_list[:finish_idx]
-        t_total_switch_target_list_finish = t_total_switch_target_list[:finish_idx]
-        drama_ref_list_finish = drama_ref_list[:finish_idx]
-        tensor_ref_list_finish = tensor_ref_list[:finish_idx]
-        fp64a_ref_list_finish = fp64a_ref_list[:finish_idx]
-        fp32a_ref_list_finish = fp32a_ref_list[:finish_idx]
-        fp16a_ref_list_finish = fp16a_ref_list[:finish_idx]
-    else:
-        t_total_overlap_target_list_finish = t_total_overlap_target_list
-        t_total_sequential_target_list_finish = t_total_sequential_target_list
-        t_total_switch_target_list_finish = t_total_switch_target_list
-        drama_ref_list_finish = drama_ref_list
-        tensor_ref_list_finish = tensor_ref_list
-        fp64a_ref_list_finish = fp64a_ref_list
-        fp32a_ref_list_finish = fp32a_ref_list   
-        fp16a_ref_list_finish = fp16a_ref_list
-
-    if start_ts is not None or end_ts is not None:
-        start_idx = 0
-        end_idx = len(t_total_overlap_target_list_finish)
-
-        if start_ts is not None:
-            start_idx = max(0, int(start_ts / sample_interval_ms))
+        return TimeComponents(
+            t_flop=t_flop,
+            t_dram=t_dram,
+            t_kernel=t_kernel,
+            t_pcie=t_pcie,
+            t_nvlink=t_nvlink,
+            t_othernode=t_othernode
+        )
+    
+    def get_time_slice(self, overall_runtime_ms: float, start_ts: Optional[float], 
+                       end_ts: Optional[float], data_length: int) -> TimeSlice:
+        """Calculate time slice indices"""
+        finish_idx = min(
+            int(overall_runtime_ms / (self.sample_intv * 1000)), 
+            data_length
+        )
+        start_idx = int((start_ts or 0) / (self.sample_intv * 1000))
         
         if end_ts is not None:
-            end_idx = min(len(t_total_overlap_target_list_finish), int(end_ts / sample_interval_ms))
-        
-        if start_idx < end_idx:
-            t_total_overlap_target_list_slice = t_total_overlap_target_list_finish[start_idx:end_idx]
-            t_total_sequential_target_list_slice = t_total_sequential_target_list_finish[start_idx:end_idx]
-            t_total_switch_target_list_slice = t_total_switch_target_list_finish[start_idx:end_idx]
-            drama_ref_list_slice = drama_ref_list_finish[start_idx:end_idx]
-            tensor_ref_list_slice = tensor_ref_list_finish[start_idx:end_idx]
-            fp64a_ref_list_slice = fp64a_ref_list_finish[start_idx:end_idx]
-            fp32a_ref_list_slice = fp32a_ref_list_finish[start_idx:end_idx]
-            fp16a_ref_list_slice = fp16a_ref_list_finish[start_idx:end_idx]
+            end_idx = min(finish_idx, int(end_ts / (self.sample_intv * 1000)))
+            if start_idx > end_idx:
+                raise ValueError("End timestamp is earlier than start timestamp")
         else:
-            t_total_overlap_target_list_slice = []
-            t_total_sequential_target_list_slice = []
-            t_total_switch_target_list_slice = []
-            drama_ref_list_slice = []
-            tensor_ref_list_slice = []
-            fp64a_ref_list_slice = []
-            fp32a_ref_list_slice = []
-            fp16a_ref_list_slice = []
-            raise ValueError("End Timestamp is earlier than Start Timestamp")
+            end_idx = finish_idx
+        
+        return TimeSlice(start_idx=start_idx, end_idx=end_idx)
+
+
+class MetricIntensityCalculator:
+    """Calculates computational intensities"""
+    
+    def metric_intensities(self, metrics: MetricValues) -> Dict[str, float]:
+        """Calculate all intensity metrics"""
+        if metrics.gract == 0:
+            return {
+                'drama_gract': 0.0, 'tenso_gract': 0.0, 'fp64a_gract': 0.0, 
+                'fp32a_gract': 0.0, 'fp16a_gract': 0.0, 'smocc_gract': 0.0
+            }
+        
+        return {
+            'drama_gract': metrics.drama / metrics.gract,
+            'tenso_gract': metrics.tenso / metrics.gract,
+            'fp64a_gract': metrics.fp64a / metrics.gract,
+            'fp32a_gract': metrics.fp32a / metrics.gract,
+            'fp16a_gract': metrics.fp16a / metrics.gract,
+            'smocc_gract': metrics.smocc / metrics.gract
+        }
+
+
+class ScaleCalculator:
+    """Calculates scaling factors for target GPU"""
+
+    INTENSITY_THRESHOLD = 0.01
+
+    def __init__(self, ref_gpu: GPU, tgt_gpu: GPU, tensor_prec: str):
+        self.ref_gpu = ref_gpu
+        self.tgt_gpu = tgt_gpu
+        
+        # Precompute ratios
+        self._compute_ratios(tensor_prec)
+
+        # Initialize state
+        self.cur_smocc = 0
+        self.cur_warps_ref = 0
+        self.cur_warps_tgt = {'lower': 0, 'mid': 0, 'upper': 0}
+        self.scale_smocc = {'lower': 0, 'mid': 0, 'upper': 0}
+
+    def _compute_ratios(self, tensor_prec: str):
+        """Compute all GPU spec ratios once during initialization"""
+        self.reg_sm_limit = self._get_ratio("reg_size_sm")
+        self.shmem_sm_limit = self._get_ratio("shmem_sm")
+        self.bw_ratio = self._get_ratio("mem_bw")
+        self.tensor_ratio = self._get_ratio(tensor_prec)
+        self.fp64_ratio = self._get_ratio("fp64")
+        self.fp32_ratio = self._get_ratio("fp32")
+        self.fp16_ratio = self._get_ratio("fp16")
+        self.pcie_ratio = self._get_ratio("pcie_bw")
+        self.nvlink_ratio = self._get_ratio("nvlink_bw")
+
+    def _get_ratio(self, spec: str) -> float:
+        """Helper to compute target/reference ratio for a given spec"""
+        ref_val = self.ref_gpu.get_specs(spec)
+        tgt_val = self.tgt_gpu.get_specs(spec)
+        return tgt_val / ref_val if ref_val != 0 else 0
+
+    def _estimate_warps(self):
+        """Estimate warps on target GPU"""
+        ref_max_warps = self.ref_gpu.get_specs("max_warps_sm")
+        tgt_max_warps = self.tgt_gpu.get_specs("max_warps_sm")
+
+        self.cur_warps_ref = self.cur_smocc * ref_max_warps
+
+        self.cur_warps_tgt['lower'] = min(
+            self.cur_warps_ref * self.reg_sm_limit,
+            self.cur_warps_ref * self.shmem_sm_limit,
+            tgt_max_warps
+        )
+        
+        self.cur_warps_tgt['mid'] = min(
+            self.cur_warps_ref * (self.reg_sm_limit + self.shmem_sm_limit) * 0.5,
+            tgt_max_warps
+        )   
+
+        self.cur_warps_tgt['upper'] = min(
+            max(self.cur_warps_ref * self.reg_sm_limit,
+                self.cur_warps_ref * self.shmem_sm_limit),
+            tgt_max_warps
+        )
+        
+    def refresh_smocc(self, smocc_ref: float):
+        """Update SMOCC and recalculate warps"""
+        self.cur_smocc = smocc_ref
+        self._estimate_warps()
+
+    def smocc_scale(self) -> Tuple[float, float, float]:
+        """Calculate SM occupancy scaling factors"""
+        k_smocc_ref = self._compute_k_smocc(self.cur_warps_ref, self.ref_gpu)
+        
+        for level in ['lower', 'mid', 'upper']:
+            k_smocc_tgt = self._compute_k_smocc(self.cur_warps_tgt[level], self.tgt_gpu)
+            self.scale_smocc[level] = k_smocc_tgt / k_smocc_ref if k_smocc_ref != 0 else 0
+        
+        return self.scale_smocc['lower'], self.scale_smocc['mid'], self.scale_smocc['upper']
+
+    def _compute_k_smocc(self, warps: float, gpu: GPU) -> float:
+        """Compute k_smocc value for given warps and GPU"""
+        return warps * gpu.get_specs("num_sm") * gpu.get_specs("boost_clock")
+
+    def dram_scale(self, dram_ref: float) -> Tuple[float, float, float]:
+        """Calculate DRAM bandwidth scaling factors"""
+        return self._compute_scale(dram_ref, self.bw_ratio)
+
+    def tensor_scale(self, tensor_ref: float) -> Tuple[float, float, float]:
+        """Calculate tensor core scaling factors"""
+        return self._compute_scale(tensor_ref, self.tensor_ratio)
+
+    def fp64_scale(self, fp64_ref: float) -> Tuple[float, float, float]:
+        """Calculate FP64 scaling factors"""
+        return self._compute_scale(fp64_ref, self.fp64_ratio)
+    
+    def fp32_scale(self, fp32_ref: float) -> Tuple[float, float, float]:
+        """Calculate FP32 scaling factors"""
+        return self._compute_scale(fp32_ref, self.fp32_ratio)
+
+    def fp16_scale(self, fp16_ref: float) -> Tuple[float, float, float]:
+        """Calculate FP16 scaling factors"""
+        return self._compute_scale(fp16_ref, self.fp16_ratio)
+
+    def pcie_scale(self) -> float:
+        """Calculate PCIe bandwidth scaling factor"""
+        return self.pcie_ratio
+
+    def nvlink_scale(self) -> float:
+        """Calculate NVLink bandwidth scaling factor"""
+        return self.nvlink_ratio
+
+    def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float]:
+        """Generic method to compute scaling factors for any intensity metric"""
+        if intensity_ref < self.INTENSITY_THRESHOLD:
+            return np.inf, np.inf, np.inf
+        
+        scale_factor = ratio / intensity_ref if intensity_ref != 0 else 0
+        return (
+            min(self.scale_smocc['lower'], scale_factor),
+            min(self.scale_smocc['mid'], scale_factor),
+            min(self.scale_smocc['upper'], scale_factor)
+        )
+
+
+class ResultsFormatter:
+    """Formats and prints results"""
+    
+    @staticmethod
+    def print_reference_results(metrics: Dict[str, List[float]], flops: float, 
+                               mem_bw: float, gpu_name: str):
+        """Print reference hardware results"""
+        print(f"\n{'='*60}")
+        print(f"Reference Hardware: {gpu_name}")
+        
+        print(f"\nEstimated Kernel Time: {sum(metrics['t_kernel']):.2f} s")
+        print(f"Estimated PCIe Time: {sum(metrics['t_pcie']):.2f} s")
+        print(f"Estimated NVLink Time: {sum(metrics['t_nvlink']):.2f} s")
+        print(f"Estimated Other Node Time: {sum(metrics['t_othernode']):.2f} s")
+        print(f"Estimated Total Runtime: {sum(metrics['t_total']):.2f} s")
+        print(f"{'='*60}\n")
+    
+    @staticmethod
+    def print_target_results(metrics: Dict[str, List[float]], flops: float, 
+                            mem_bw: float, gpu_name: str):
+        """Print target hardware results"""
+        print(f"\n{'='*60}")
+        print(f"Target Hardware: {gpu_name}")
+        
+        print(f"\nEstimated Kernel Time [Lower SMOCC]: {sum(metrics['t_kernel_lower']):.2f} s")
+        print(f"Estimated Kernel Time [Mid SMOCC]:   {sum(metrics['t_kernel_mid']):.2f} s")
+        print(f"Estimated Kernel Time [Upper SMOCC]: {sum(metrics['t_kernel_upper']):.2f} s")
+        
+        print(f"\nEstimated PCIe Time: {sum(metrics['t_pcie']):.2f} s")
+        print(f"Estimated NVLink Time: {sum(metrics['t_nvlink']):.2f} s")
+        print(f"Estimated Other Node Time: {sum(metrics['t_othernode']):.2f} s")
+        
+        print(f"\nEstimated Total Runtime [Lower SMOCC]: {sum(metrics['t_total_lower']):.2f} s")
+        print(f"Estimated Total Runtime [Mid SMOCC]:   {sum(metrics['t_total_mid']):.2f} s")
+        print(f"Estimated Total Runtime [Upper SMOCC]: {sum(metrics['t_total_upper']):.2f} s")
+        print(f"{'='*60}\n")
+
+
+class BaseProfiler(ABC):
+    """Abstract base class for profilers"""
+    
+    def __init__(self, sample_interval_ms: float):
+        self.sample_interval_ms = sample_interval_ms
+        self.intensity_calc = MetricIntensityCalculator()
+        self.formatter = ResultsFormatter()
+        
+    @abstractmethod
+    def run(self, *args, **kwargs):
+        """Run the profiling/prediction"""
+        pass
+
+
+class ReferenceProfiler(BaseProfiler):
+    """Profiles performance on reference hardware for multiple GPUs"""
+    
+    def __init__(self, sample_interval_ms: float, gpu_name: str):
+        self.gpu = GPU(gpu_name=gpu_name)
+        super().__init__(sample_interval_ms)
+        self.time_calc = TimeCalculator(sample_interval_ms, self.gpu)
+
+    def run(self, gpu_dfs: List[pd.DataFrame], metrics: List[str], 
+            overall_runtime_ms: float, agg_interval_ms: float,
+            start_ts: Optional[float], end_ts: Optional[float], 
+            tensor_prec: str):
+        """Model performance on reference hardware for multiple GPUs"""
+        
+        # Process each GPU
+        all_gpu_metrics = []
+        for gpu_id, df in enumerate(gpu_dfs):
+            if df.empty:
+                raise ValueError(f"GPU {gpu_id} DataFrame is empty")
             
-        est_mem_bw = np.mean(drama_ref_list_slice) * target_gpu_spec["target_mem_bw"]
+            # print(f"\nProcessing GPU {gpu_id}...")
+            gpu_metrics = self._process_single_gpu(df, metrics, overall_runtime_ms, 
+                                                   start_ts, end_ts, tensor_prec)
+            all_gpu_metrics.append(gpu_metrics)
         
-        est_flops = (np.mean(tensor_ref_list_slice) * target_gpu_spec[prec_target_mappings[precision]] +
-                     np.mean(fp64a_ref_list_slice) * target_gpu_spec["target_fp64"] + 
-                     np.mean(fp32a_ref_list_slice) * target_gpu_spec["target_fp32"] +
-                     np.mean(fp16a_ref_list_slice) * target_gpu_spec["target_fp16"])
-        print(f"Estimate FLOPS On Target Hardware: {est_flops:0.2f}")
-        print(f"Estimate Memory BandWidth On Target Hardware: {est_mem_bw:0.2f}")
-        return t_total_overlap_target_list_slice, t_total_sequential_target_list_slice, t_total_switch_target_list_slice
-    
-    return t_total_overlap_target_list_finish, t_total_sequential_target_list_finish, t_total_switch_target_list_finish
-
-
-def perf_predict(gpu_dfs, metrics, overall_runtime_ms_ref, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch, target_gpu_arch, precision, flop_util, mem_util):
-    finish_idx = int(overall_runtime_ms_ref / sample_interval_ms)
-
-    def get_gpu_specs(gpu_arch, prefix):
-        """Get GPU specifications with appropriate prefix."""
-        try:
-            specs = GPU_SPECS.get(gpu_arch)
-            return {f"{prefix}_{key}": value for key, value in specs.items()}
-        except KeyError:
-            print("GPU architect is not found in GPU SPEC DICT")
+        # Aggregate across GPUs
+        aggregated_metrics = self._aggregate_multi_gpu(all_gpu_metrics, agg_interval_ms)
         
-    # Get specifications for both reference and target GPUs
-    ref_gpu_spec = get_gpu_specs(ref_gpu_arch, "ref")
-    target_gpu_spec = get_gpu_specs(target_gpu_arch, "target")
-
-    t_total_overlap_dict = dict()
-    t_total_sequential_dict = dict()
-    t_total_switch_dict = dict()
-
-    for i, df in enumerate(gpu_dfs):
-        if not df.empty:
-            t_total_overlap, t_total_sequential, t_total_switch = pref_predict_per_gpu(df, metrics, 
-                                                                                       finish_idx, sample_interval_ms, start_ts, end_ts, 
-                                                                                       ref_gpu_spec, target_gpu_spec, precision, 
-                                                                                       flop_util, mem_util)
-            t_total_overlap_dict[f"GPU{i}"] = t_total_overlap
-            t_total_sequential_dict[f"GPU{i}"] = t_total_sequential
-            t_total_switch_dict[f"GPU{i}"] = t_total_switch
-        else:
-            raise ValueError("The total time list is empty")
-
-    # Now compute the max for each row index
-    # First, check that all lists are of the same length
-    lengths = [len(lst) for lst in t_total_overlap_dict.values()]
-    if len(set(lengths)) != 1:
-        raise ValueError("Not all GPU t_total lists are of the same length!")
+        # Calculate overall performance metrics
+        flops = self._calc_flops(aggregated_metrics, tensor_prec)
+        mem_bw = self._calc_mem_bw(aggregated_metrics)
+        
+        # Print results
+        self.formatter.print_reference_results(aggregated_metrics, flops, mem_bw, 
+                                              self.gpu.get_name())
     
-    num_rows = lengths[0]
-    # Aggregate every `agg_samples` samples
-    # When agg_interval_ms == sample_interval_ms, aggregation is on a row basis
-    agg_samples = agg_interval_ms // sample_interval_ms
-
-    # Transpose the lists and take max of every `agg_samples` samples
-    max_value_overlap_list = []
-    max_value_sequential_list = []
-    max_value_switch_list = []
-
-    for start in range(0, num_rows, agg_samples):
-        end = min(start + agg_samples, num_rows)
-        # For each row in this window, find the max across GPUs, then find the max in the window
-        agg_time_gpus = {
-            gpu: sum(t_total_overlap_dict[gpu][row_idx] for row_idx in range(start, end))
-            for gpu in t_total_overlap_dict
-        }
-
-        # window_max = max(agg_time_gpus.values())
-        max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
-        max_value_overlap_list.append(max_value)
+    def _process_single_gpu(self, df: pd.DataFrame, metrics: List[str],
+                           overall_runtime_ms: float, start_ts: Optional[float],
+                           end_ts: Optional[float], tensor_prec: str) -> Dict[str, List[float]]:
+        """Process a single GPU's data"""
+        # Calculate components for all rows
+        components_list = [
+            self.time_calc.calc_components(MetricValues.from_row(row, metrics))
+            for row in df.itertuples(index=False)
+        ]
+        
+        # Get time slice
+        time_slice = self.time_calc.get_time_slice(
+            overall_runtime_ms, start_ts, end_ts, len(components_list)
+        )
+        
+        # Slice and aggregate components
+        sliced = self._slice_and_aggregate(components_list, time_slice)
+        
+        return sliced
     
-    for start in range(0, num_rows, agg_samples):
-        end = min(start + agg_samples, num_rows)
-        # For each row in this window, find the max across GPUs, then find the max in the window
-        agg_time_gpus = {
-            gpu: sum(t_total_sequential_dict[gpu][row_idx] for row_idx in range(start, end))
-            for gpu in t_total_sequential_dict
+    def _slice_and_aggregate(self, components_list: List[TimeComponents], 
+                            time_slice: TimeSlice) -> Dict[str, List[float]]:
+        """Slice components and add total time"""
+        sliced = {
+            key: [comp.to_dict()[key] for comp in components_list][time_slice.start_idx:time_slice.end_idx]
+            for key in components_list[0].to_dict().keys()
         }
+        
+        # Add total time
+        sliced['t_total'] = [
+            sliced['t_kernel'][i] + sliced['t_pcie'][i] + 
+            sliced['t_nvlink'][i] + sliced['t_othernode'][i]
+            for i in range(len(sliced['t_kernel']))
+        ]
+        
+        return sliced
+    
+    def _aggregate_multi_gpu(self, all_gpu_metrics: List[Dict[str, List[float]]], 
+                            agg_interval_ms: float) -> Dict[str, List[float]]:
+        """Aggregate metrics across multiple GPUs"""
+        # Check all GPUs have same length
+        lengths = [len(m['t_total']) for m in all_gpu_metrics]
+        if len(set(lengths)) != 1:
+            raise ValueError("Not all GPU metric lists are of the same length!")
+        
+        num_rows = lengths[0]
+        agg_samples = agg_interval_ms // self.sample_interval_ms
+        
+        # Aggregate by taking max across GPUs for each time window
+        aggregated = {key: [] for key in all_gpu_metrics[0].keys()}
+        
+        for start in range(0, num_rows, agg_samples):
+            end = min(start + agg_samples, num_rows)
+            
+            for key in aggregated.keys():
+                # Sum within each GPU's window, then take max across GPUs
+                window_values = [
+                    sum(gpu_metrics[key][row_idx] for row_idx in range(start, end))
+                    for gpu_metrics in all_gpu_metrics
+                ]
+                aggregated[key].append(max(window_values))
+        
+        return aggregated
+    
+    def _calc_flops(self, sliced: Dict[str, List[float]], tensor_prec: str) -> float:
+        """Calculate FLOPS"""
+        return (np.mean(sliced['t_flop']) / self.time_calc.sample_intv * 
+                self.gpu.get_specs(tensor_prec))
+    
+    def _calc_mem_bw(self, sliced: Dict[str, List[float]]) -> float:
+        """Calculate memory bandwidth"""
+        return (np.mean(sliced['t_dram']) / self.time_calc.sample_intv * 
+                self.gpu.get_specs("mem_bw"))
 
-        max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
-        max_value_sequential_list.append(max_value)
 
-    for start in range(0, num_rows, agg_samples):
-        end = min(start + agg_samples, num_rows)
-        # For each row in this window, find the max across GPUs, then find the max in the window
-        agg_time_gpus = {
-            gpu: sum(t_total_switch_dict[gpu][row_idx] for row_idx in range(start, end))
-            for gpu in t_total_switch_dict
+class TargetPredictor(BaseProfiler):
+    """Predicts performance on target hardware for multiple GPUs"""
+    
+    def __init__(self, sample_interval_ms: float, ref_gpu_name: str, tgt_gpu_name: str):
+        self.ref_gpu = GPU(gpu_name=ref_gpu_name)
+        self.tgt_gpu = GPU(gpu_name=tgt_gpu_name)
+        super().__init__(sample_interval_ms)
+        self.time_calc = TimeCalculator(sample_interval_ms, self.ref_gpu)
+
+    def run(self, gpu_dfs: List[pd.DataFrame], metrics: List[str],
+            overall_runtime_ms: float, agg_interval_ms: float,
+            start_ts: Optional[float], end_ts: Optional[float], 
+            tensor_prec: str):
+        """Predict performance on target hardware for multiple GPUs"""
+        
+        # Process each GPU
+        all_gpu_metrics = []
+        for gpu_id, df in enumerate(gpu_dfs):
+            if df.empty:
+                raise ValueError(f"GPU {gpu_id} DataFrame is empty")
+            
+            # print(f"\nPredicting for GPU {gpu_id}...")
+            gpu_metrics = self._predict_single_gpu(df, metrics, overall_runtime_ms,
+                                                   start_ts, end_ts, tensor_prec)
+            all_gpu_metrics.append(gpu_metrics)
+        
+        # Aggregate across GPUs
+        aggregated_metrics = self._aggregate_multi_gpu(all_gpu_metrics, agg_interval_ms)
+        
+        # Calculate estimated FLOPS and memory bandwidth
+        est_flops = self._calc_est_flops(aggregated_metrics, tensor_prec)
+        est_mem_bw = self._calc_est_mem_bw(aggregated_metrics)
+        
+        # Print predictions
+        self.formatter.print_target_results(aggregated_metrics, est_flops, est_mem_bw, 
+                                           self.tgt_gpu.get_name())
+    
+    def _predict_single_gpu(self, df: pd.DataFrame, metrics: List[str],
+                           overall_runtime_ms: float, start_ts: Optional[float],
+                           end_ts: Optional[float], tensor_prec: str) -> Dict[str, List[float]]:
+        """Predict performance for a single GPU"""
+        # Calculate target metrics
+        target_metrics = self._calc_target_metrics(df, metrics, tensor_prec)
+        
+        # Get time slice
+        time_slice = self.time_calc.get_time_slice(
+            overall_runtime_ms, start_ts, end_ts, len(target_metrics['t_total_lower'])
+        )
+        
+        # Slice metrics
+        sliced_metrics = time_slice.slice_dict(target_metrics)
+        
+        return sliced_metrics
+    
+    def _calc_target_metrics(self, df: pd.DataFrame, metrics: List[str],
+                            tensor_prec: str) -> Dict[str, List[float]]:
+        """Calculate metrics for target hardware"""
+        results = {
+            't_kernel_lower': [], 't_kernel_mid': [], 't_kernel_upper': [],
+            't_pcie': [], 't_nvlink': [], 't_othernode': [],
+            't_total_lower': [], 't_total_mid': [], 't_total_upper': [],
+            'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 
+            'fp32a_ref': [], 'fp16a_ref': []
         }
+        
+        scale_calc = ScaleCalculator(self.ref_gpu, self.tgt_gpu, tensor_prec)
+        
+        for row in df.itertuples(index=False):
+            mv = MetricValues.from_row(row, metrics)
+            
+            # Store reference metrics
+            results['drama_ref'].append(mv.drama)
+            results['tensor_ref'].append(mv.tenso)
+            results['fp64a_ref'].append(mv.fp64a)
+            results['fp32a_ref'].append(mv.fp32a)
+            results['fp16a_ref'].append(mv.fp16a)
+            
+            # Calculate intensities
+            intensities = self.intensity_calc.metric_intensities(mv)
+            
+            # Calculate reference components
+            ref_components = self.time_calc.calc_components(mv)
+            
+            # Estimate Warps on target GPU
+            scale_calc.refresh_smocc(intensities['smocc_gract'])
+            
+            # Calculate kernel scales
+            smocc_lower, smocc_mid, smocc_upper = scale_calc.smocc_scale()
+            dram_lower, dram_mid, dram_upper = scale_calc.dram_scale(intensities['drama_gract'])
+            tensor_lower, tensor_mid, tensor_upper = scale_calc.tensor_scale(intensities['tenso_gract'])
+            fp64_lower, fp64_mid, fp64_upper = scale_calc.fp64_scale(intensities['fp64a_gract'])
+            fp32_lower, fp32_mid, fp32_upper = scale_calc.fp32_scale(intensities['fp32a_gract'])
+            fp16_lower, fp16_mid, fp16_upper = scale_calc.fp16_scale(intensities['fp16a_gract'])
+            
+            kernel_scale_lower = min(smocc_lower, dram_lower, tensor_lower, 
+                                    fp64_lower, fp32_lower, fp16_lower)
+            kernel_scale_mid = min(smocc_mid, dram_mid, tensor_mid, 
+                                  fp64_mid, fp32_mid, fp16_mid)
+            kernel_scale_upper = min(smocc_upper, dram_upper, tensor_upper, 
+                                    fp64_upper, fp32_upper, fp16_upper)
+            
+            # Calculate kernel times for each scenario
+            for scale, suffix in [(kernel_scale_lower, 'lower'), 
+                                 (kernel_scale_mid, 'mid'), 
+                                 (kernel_scale_upper, 'upper')]:
+                t_kernel = ref_components.t_kernel / scale if scale != 0 else 0
+                results[f't_kernel_{suffix}'].append(t_kernel)
+            
+            # Calculate communication times
+            pcie_scale = scale_calc.pcie_scale()
+            nvlink_scale = scale_calc.nvlink_scale()
+            
+            t_pcie = ref_components.t_pcie / pcie_scale if pcie_scale != 0 else 0
+            t_nvlink = ref_components.t_nvlink / nvlink_scale if nvlink_scale != 0 else 0
+            
+            results['t_pcie'].append(t_pcie)
+            results['t_nvlink'].append(t_nvlink)
+            
+            # Other node time (unchanged)
+            t_othernode = ref_components.t_othernode
+            results['t_othernode'].append(t_othernode)
+            
+            # Calculate totals
+            results['t_total_lower'].append(results['t_kernel_lower'][-1] + t_pcie + 
+                                           t_nvlink + t_othernode)
+            results['t_total_mid'].append(results['t_kernel_mid'][-1] + t_pcie + 
+                                         t_nvlink + t_othernode)
+            results['t_total_upper'].append(results['t_kernel_upper'][-1] + t_pcie + 
+                                           t_nvlink + t_othernode)
+        
+        return results
+    
+    def _aggregate_multi_gpu(self, all_gpu_metrics: List[Dict[str, List[float]]], 
+                            agg_interval_ms: float) -> Dict[str, List[float]]:
+        """Aggregate metrics across multiple GPUs"""
+        # Check all GPUs have same length
+        lengths = [len(m['t_total_lower']) for m in all_gpu_metrics]
+        if len(set(lengths)) != 1:
+            raise ValueError("Not all GPU metric lists are of the same length!")
+        
+        num_rows = lengths[0]
+        agg_samples = agg_interval_ms // self.sample_interval_ms
+        
+        # Aggregate by taking max across GPUs for each time window
+        aggregated = {key: [] for key in all_gpu_metrics[0].keys()}
+        
+        for start in range(0, num_rows, agg_samples):
+            end = min(start + agg_samples, num_rows)
+            
+            for key in aggregated.keys():
+                # Sum within each GPU's window, then take max across GPUs
+                window_values = [
+                    sum(gpu_metrics[key][row_idx] for row_idx in range(start, end))
+                    for gpu_metrics in all_gpu_metrics
+                ]
+                aggregated[key].append(max(window_values))
+        
+        return aggregated
+    
+    def _calc_est_flops(self, sliced_metrics: Dict[str, List[float]], 
+                       tensor_prec: str) -> float:
+        """Calculate estimated FLOPS"""
+        return (
+            np.mean(sliced_metrics.get('tensor_ref')) * self.tgt_gpu.get_specs(tensor_prec) +
+            np.mean(sliced_metrics.get('fp64a_ref')) * self.tgt_gpu.get_specs("fp64") +
+            np.mean(sliced_metrics.get('fp32a_ref')) * self.tgt_gpu.get_specs("fp32") +
+            np.mean(sliced_metrics.get('fp16a_ref')) * self.tgt_gpu.get_specs("fp16")
+        )
+    
+    def _calc_est_mem_bw(self, sliced_metrics: Dict[str, List[float]]) -> float:
+        """Calculate estimated memory bandwidth"""
+        return np.mean(sliced_metrics.get('drama_ref')) * self.tgt_gpu.get_specs("mem_bw")
 
-        max_index, max_value = max(enumerate(agg_time_gpus.values()), key=lambda x: x[1])
-        max_value_switch_list.append(max_value)
 
-    print(f"Estimate Runtime On Target Hardware [Overlap Mode]: {sum(max_value_overlap_list):.2f}")
-    print(f"Estimate Runtime On Target Hardware [Sequential Mode]: {sum(max_value_sequential_list):.2f}")
-    # print(f"Estimate Runtime On Target Hardware [Switch Mode]: {sum(max_value_switch_list):.2f}")
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments"""
+    parser = argparse.ArgumentParser(
+        description='Multi-GPU Performance Profiler and Predictor',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument('-f', '--dcgm_input', required=True, help='DCGM input: file or folder path')
+    parser.add_argument('-n', '--num_gpu', type=int, required=True, help='Number of GPUs')
+    parser.add_argument('-d', '--sample_interval_ms', type=int, required=True, help='Sample interval in milliseconds')
+    parser.add_argument('-a', '--agg_interval_ms', type=int, required=True, help='Aggregation interval in milliseconds')
+    parser.add_argument('-st', '--start_timestamp', type=int, default=0, help='Start timestamp (ms, default: 0)')
+    parser.add_argument('-et', '--end_timestamp', type=int, default=None, help='End timestamp (ms, default: None)')
+    parser.add_argument('-o', '--overall_runtime_ms', type=int, required=True, help='Overall runtime in milliseconds')
+    parser.add_argument('-rg', '--ref_gpu', required=True, choices=list(GPUSpec.keys()), help='Reference GPU')
+    parser.add_argument('-tg', '--tgt_gpu', choices=list(GPUSpec.keys()), help='Target GPU (optional)')
+    parser.add_argument('--metrics', type=lambda s: s.split(','), required=True, help='Comma-separated list of metrics')
+    parser.add_argument('-tp', '--tensor_precision', required=True, choices=['tf64', 'tf32', 'tf16'], help='Tensor precision type')
+    
+    return parser.parse_args()
 
 
 def main():
-    ###################################
-    # get all parameters
-    ###################################
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('-f', '--dcgm_input', action='store', type=str, required=True,
-                        help='DCGM input: either a single file (containing multiple GPU data) or a folder path (containing multiple files with one GPU data each)')
-    parser.add_argument('-n', '--num_gpu', action='store', type=int, required=True,
-                        help='indicate number of gpus used for computation')    
-    parser.add_argument('-o', '--overall_runtime_ms', action='store', type=int, required=True,
-                        help='indicate the timestamp for overall runtime in milliseconds')
-    parser.add_argument('-st', '--start_timestamp', action='store', type=int, required=False, default=None,
-                        help='Start timestamp for analysis window (in milliseconds)')
-    parser.add_argument('-et', '--end_timestamp', action='store', type=int, required=False, default=None,
-                        help='End timestamp for analysis window (in milliseconds)')
-    parser.add_argument('-s', '--sample_interval_ms', action='store', type=int, required=True,
-                        help='indicate the sample interval in milliseconds')
-    parser.add_argument('-a', '--aggregate_interval_ms', action='store', type=int, required=True,
-                        help='indicate the time interval for aggregation in milliseconds') 
-    parser.add_argument('-rg', '--ref_gpu_architect', action='store', type=str, required=True, 
-                        choices=['A100-40', 'A100-80', 'H100'], help='indicate the reference gpu architecture')
-    parser.add_argument('-tg', '--target_gpu_architect', action='store', type=str, default=None, 
-                        choices=['A100-40', 'A100-80', 'A40', 'H100', 'R100', 'R100-UNI', 
-                                 'GPU-M-IO-A-H14', 'GPU-F-IO-A-H14', 'GPU-M-IO-A-H22', 'GPU-F-IO-A-H22', 'GPU-M-IO-A-H24', 'GPU-F-IO-A-H24'], 
-                        help='indicate the target gpu architecture')
-    parser.add_argument('--metrics', type=list_of_strings, required=True, 
-                        help='List of metrics, basically the not-none col names')
-    parser.add_argument('-p', '--precision', type=str, required=True, choices=['tf64', 'fp64', 'tf32', 'fp32', 'tf16'],
-                        help='Specify the precision type: TF64 (FP64 Tensor), FP64, TF32 (FP32 Tensor), FP32, TF16 (FP16 Tensor) . Default: single')
-    parser.add_argument('-fu', '--flop_util', action='store', type=float, default=1.0,
-                        help='indicate the estimated flops utlization when bound swtich')
-    parser.add_argument('-mu', '--mem_util', action='store', type=float, default=1.0,
-                        help='indicate the estimated memory utlization when bound swtich')
-    args = parser.parse_args()
-
-    dcgm_input = args.dcgm_input
-    num_gpu = args.num_gpu
-    overall_runtime_ms = args.overall_runtime_ms
-    start_ts = args.start_timestamp
-    end_ts = args.end_timestamp
-    sample_interval_ms = args.sample_interval_ms
-    agg_interval_ms = args.aggregate_interval_ms
-    metrics = args.metrics
-    ref_gpu_arch = args.ref_gpu_architect
-    target_gpu_arch = args.target_gpu_architect
-    flop_util = args.flop_util
-    mem_util = args.mem_util
-    precision = args.precision
-
-    profiled_df = process_files(num_gpu, dcgm_input, metrics)
-    print(profiled_df)
-    perf_modeling(profiled_df, metrics, overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, ref_gpu_arch)
+    args = parse_arguments()
     
-    if target_gpu_arch is not None:
-        perf_predict(profiled_df, metrics, 
-                     overall_runtime_ms, sample_interval_ms, agg_interval_ms, start_ts, end_ts, 
-                     ref_gpu_arch, target_gpu_arch, precision, 
-                     flop_util, mem_util)
-    
+    # Process metrics file
+    metrics_processor = MetricsProcessor(args.num_gpu, args.metrics)
+    gpu_dfs = metrics_processor.process_files(args.dcgm_input)
+
+    print(f"\nProcessed {len(gpu_dfs)} GPUs")
+    for i, df in enumerate(gpu_dfs):
+        print(f"GPU {i}: {len(df)} samples")
+
+    # Create and run reference profiler
+    ref_profiler = ReferenceProfiler(args.sample_interval_ms, args.ref_gpu)
+    ref_profiler.run(
+        gpu_dfs, args.metrics, args.overall_runtime_ms, args.agg_interval_ms,
+        args.start_timestamp, args.end_timestamp, args.tensor_precision
+    )
+
+    # Create target predictor and run if specified
+    if args.tgt_gpu:
+        tgt_predictor = TargetPredictor(args.sample_interval_ms, args.ref_gpu, args.tgt_gpu)
+        tgt_predictor.run(
+            gpu_dfs, args.metrics, args.overall_runtime_ms, args.agg_interval_ms,
+            args.start_timestamp, args.end_timestamp, args.tensor_precision
+        )
+
 
 if __name__=="__main__":
     main()
