@@ -7,18 +7,20 @@ plt.rcParams['hatch.linewidth'] = 2.0
 # Data
 categories = ['H100', 'A100-40G', 'A40']
 
+# Use H100 as reference
+measured_total = [402, 855, 1968]
+measured_quda = [367, 811, 1939]
+smocc_upper = [402, 664, 1311]
+smocc_mid = [402, 756, 1321]
+smocc_lower = [402, 888, 1498]
 
-measured_total = [402, 855, 1]
-measured_quda = [367, 811, 1]
-smocc_upper = [402, 664, 1]
-smocc_mid = [402, 756, 1]
-smocc_lower = [402, 888, 1]
 '''
-measured_total = [402, 855, 1]
-measured_quda = [367, 821, 1]
-smocc_upper = [394, 854, 1]
-smocc_mid = [446, 854, 1]
-smocc_lower = [518, 854, 1]
+# Use A100 as reference
+measured_total = [402, 855, 1968]
+measured_quda = [367, 821, 1939]
+smocc_upper = [394, 854, 1545]
+smocc_mid = [446, 854, 1548]
+smocc_lower = [518, 854, 1556]
 '''
 # Calculate the non-quda portion
 measured_non_quda = [total - quda for total, quda in zip(measured_total, measured_quda)]
