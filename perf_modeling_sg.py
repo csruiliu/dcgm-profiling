@@ -354,14 +354,11 @@ class ScaleCalculator:
         )
 
     def est_flop_tgt(self, tenso_ref: float, fp64a_ref: float, fp32a_ref: float, fp16a_ref: float, tf_prec: str) -> Tuple[float, float, float]:
-        flop_tgt_lower = 0
-        flop_tgt_mid = 0
-        flop_tgt_upper = 0
+        flop_tgt_lower = flop_tgt_mid = flop_tgt_upper = 0
         for mv, spec in [(tenso_ref, tf_prec), (fp64a_ref, 'fp64'), (fp32a_ref, 'fp32'), (fp16a_ref, 'fp16')]:
             flop_tgt_lower += min(self.ref_gpu[spec] * mv * self.scale_smocc['lower'], self.tgt_gpu[spec])
             flop_tgt_mid += min(self.ref_gpu[spec] * mv * self.scale_smocc['mid'], self.tgt_gpu[spec])
             flop_tgt_upper += min(self.ref_gpu[spec] * mv * self.scale_smocc['upper'], self.tgt_gpu[spec])
-        
         
         return flop_tgt_lower, flop_tgt_mid, flop_tgt_upper
 
@@ -595,25 +592,30 @@ class TargetPredictor(BaseProfiler):
             # Estimate Warps on target GPU
             scale_calc.refresh_smocc(intensities['smocc_gract'])
             
-            # Calculate kernel scales
+            # Calculate kernel scales using smocc, dram, tensor, fp64, fp32, fp16
             smocc_lower, smocc_mid, smocc_upper = scale_calc.smocc_scale()
             dram_lower, dram_mid, dram_upper = scale_calc.dram_scale(intensities['drama_gract'])
-            dram_lower_tgt, dram_mid_tgt, dram_upper_tgt = scale_calc.est_dram_tgt(intensities['drama_gract'])
-            results['total_dram_tgt_lower'].append(dram_lower_tgt)
-            results['total_dram_tgt_mid'].append(dram_mid_tgt)
-            results['total_dram_tgt_upper'].append(dram_upper_tgt)
-            
             tensor_lower, tensor_mid, tensor_upper = scale_calc.tensor_scale(intensities['tenso_gract'])
             fp64_lower, fp64_mid, fp64_upper = scale_calc.fp64_scale(intensities['fp64a_gract'])
             fp32_lower, fp32_mid, fp32_upper = scale_calc.fp32_scale(intensities['fp32a_gract'])
             fp16_lower, fp16_mid, fp16_upper = scale_calc.fp16_scale(intensities['fp16a_gract'])
+            
+            # Estimate bandwidth and flop
+            dram_lower_tgt, dram_mid_tgt, dram_upper_tgt = scale_calc.est_dram_tgt(intensities['drama_gract'])  
             flop_lower_tgt, flop_mid_tgt, flop_upper_tgt = scale_calc.est_flop_tgt(
                 intensities['tenso_gract'], intensities['fp64a_gract'], intensities['fp32a_gract'], intensities['fp16a_gract'], tensor_prec
             )
-            results['total_flop_tgt_lower'].append(flop_lower_tgt)
-            results['total_flop_tgt_mid'].append(flop_mid_tgt)
-            results['total_flop_tgt_upper'].append(flop_upper_tgt)
+            for key, value in {
+                'total_dram_tgt_lower': dram_lower_tgt,
+                'total_dram_tgt_mid': dram_mid_tgt,
+                'total_dram_tgt_upper': dram_upper_tgt,
+                'total_flop_tgt_lower': flop_lower_tgt,
+                'total_flop_tgt_mid': flop_mid_tgt,
+                'total_flop_tgt_upper': flop_upper_tgt,
+            }.items():
+                results[key].append(value)
 
+            # Select bounded resources
             kernel_scale_lower = min(smocc_lower, dram_lower, tensor_lower, fp64_lower, fp32_lower, fp16_lower)
             kernel_scale_mid = min(smocc_mid, dram_mid, tensor_mid, fp64_mid, fp32_mid, fp16_mid)
             kernel_scale_upper = min(smocc_upper, dram_upper, tensor_upper, fp64_upper, fp32_upper, fp16_upper)
@@ -625,7 +627,6 @@ class TargetPredictor(BaseProfiler):
             
             # Other node time (unchanged)
             t_othernode = ref_components.t_othernode
-
             results['t_othernode'].append(t_othernode)
             
             # Calculate totals
