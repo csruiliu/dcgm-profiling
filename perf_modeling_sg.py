@@ -87,6 +87,22 @@ class MetricsProcessor:
         except ValueError:
             return False
 
+    @staticmethod
+    def _count_zero(profiled_df: pd.DataFrame, metrics: List[str]):
+        # Filter for gract > 0.9
+        filtered = profiled_df[profiled_df['GRACT'] > 0.9]
+        total_samples = len(filtered)
+        
+        # Count zeros for each metric
+        tensor_zeros = ((filtered['GRACT'] > 0.9) & (filtered['TENSO'] < 0.01)).sum()
+        drama_zeros = ((filtered['GRACT'] > 0.9) & (filtered['DRAMA'] < 0.01)).sum()
+        fp64_zeros = ((filtered['GRACT'] >= 0.9) & (filtered['FP64A'] < 0.01)).sum()
+        fp32_zeros = ((filtered['GRACT'] >= 0.9) & (filtered['FP32A'] < 0.01)).sum()
+        fp16_zeros = ((filtered['GRACT'] >= 0.9) & (filtered['FP16A'] < 0.01)).sum()
+        print(f"Total Samples: {total_samples}, DRAMA Zero Samples: {drama_zeros}, TENSO Zero Samples: {tensor_zeros}, "
+              f"FP64A Zero Samples: {fp64_zeros}, FP32A Zero Samples: {fp32_zeros}, FP16A Zero Samples: {fp16_zeros}")
+
+
     @classmethod
     def process_file(cls, file_path: str, metric_names: List[str]) -> pd.DataFrame:
         """Read and process the metrics file"""
@@ -96,7 +112,11 @@ class MetricsProcessor:
         header_columns, metric_indices = cls._parse_header(lines, metric_names)
         gpu_data = cls._extract_gpu_data(lines, metric_indices, len(header_columns))
         
-        return pd.DataFrame(gpu_data, columns=metric_names)
+        profiled_data = pd.DataFrame(gpu_data, columns=metric_names)
+
+        cls._count_zero(profiled_data, metric_names)
+
+        return profiled_data
 
     @classmethod
     def _parse_header(cls, lines: List[str], metric_names: List[str]) -> Tuple[List[str], List[int]]:
