@@ -1,407 +1,22 @@
 import argparse
-import re
 import pandas as pd
 import numpy as np
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 from gpu_specs import GPU, GPUSpec
-
-    
-class MetricsProcessor:
-    """Handles metrics file processing"""
-    GPU_PATTERN = re.compile(r'^GPU \d+\s')
-    HEADER_PATTERN = re.compile(r'^#Entity')
-
-    @staticmethod
-    def is_float(value: str) -> bool:
-        """Check if a string can be converted to float"""
-        try:
-            float(value)
-            return True
-        except ValueError:
-            return False
-
-    @staticmethod
-    def _count_zero(profiled_df: pd.DataFrame, metrics: List[str]):
-        # Filter for gract > 0.9
-        filtered = profiled_df[profiled_df['GRACT'] > 0.9]
-        total_samples = len(filtered)
-        
-        # Count zeros for each metric
-        tensor_zeros = ((filtered['GRACT'] > 0.9) & (filtered['TENSO'] < 0.01)).sum()
-        drama_zeros = ((filtered['GRACT'] > 0.9) & (filtered['DRAMA'] < 0.01)).sum()
-        fp64_zeros = ((filtered['GRACT'] >= 0.9) & (filtered['FP64A'] < 0.01)).sum()
-        fp32_zeros = ((filtered['GRACT'] >= 0.9) & (filtered['FP32A'] < 0.01)).sum()
-        fp16_zeros = ((filtered['GRACT'] >= 0.9) & (filtered['FP16A'] < 0.01)).sum()
-        print(f"Total Samples: {total_samples}, DRAMA Zero Samples: {drama_zeros}, TENSO Zero Samples: {tensor_zeros}, "
-              f"FP64A Zero Samples: {fp64_zeros}, FP32A Zero Samples: {fp32_zeros}, FP16A Zero Samples: {fp16_zeros}")
-
-
-    @classmethod
-    def process_file(cls, file_path: str, metric_names: List[str]) -> pd.DataFrame:
-        """Read and process the metrics file"""
-        with open(file_path, 'r') as file:
-            lines = file.readlines()
-        
-        header_columns, metric_indices = cls._parse_header(lines, metric_names)
-        gpu_data = cls._extract_gpu_data(lines, metric_indices, len(header_columns))
-        
-        profiled_data = pd.DataFrame(gpu_data, columns=metric_names)
-
-        cls._count_zero(profiled_data, metric_names)
-
-        return profiled_data
-
-    @classmethod
-    def _parse_header(cls, lines: List[str], metric_names: List[str]) -> Tuple[List[str], List[int]]:
-        """Parse header and find metric column indices"""
-        for line in lines:
-            if cls.HEADER_PATTERN.match(line):
-                header_columns = [col.strip() for col in re.split(r'\s{2,}', line.strip())]
-                metric_indices = cls._get_metric_indices(header_columns, metric_names)
-                return header_columns, metric_indices
-        raise ValueError("Could not find header line in the data file")
-
-    @staticmethod
-    def _get_metric_indices(header_columns: List[str], metric_names: List[str]) -> List[int]:
-        """Map requested metrics to their column indices"""
-        metric_indices = []
-        for metric in metric_names:
-            if metric not in header_columns:
-                raise ValueError(
-                    f"Metric '{metric}' not found in data file. "
-                    f"Available metrics: {header_columns[1:]}"
-                )
-            metric_indices.append(header_columns.index(metric) - 1)
-        return metric_indices
-
-    @classmethod
-    def _extract_gpu_data(cls, lines: List[str], metric_indices: List[int], num_columns: int) -> List[List[float]]:
-        """Extract GPU data from lines"""
-        gpu_data = []
-        for line in lines:
-            if cls.HEADER_PATTERN.match(line):
-                continue
-            if cls.GPU_PATTERN.match(line):
-                values = re.split(r'\s{3,}', line.strip())
-                numeric_values = [float(v) for v in values if cls.is_float(v)]
-                
-                if len(numeric_values) >= num_columns - 1:
-                    selected_values = [numeric_values[i] for i in metric_indices]
-                    gpu_data.append(selected_values)
-                else:
-                    print(f"Warning: Line has insufficient data columns: {line.strip()}")
-        return gpu_data
-
-
-@dataclass
-class MetricValues:
-    """Container for extracted metric values from a row"""
-    gract: float = 0.0
-    drama: float = 0.0
-    tenso: float = 0.0
-    fp64a: float = 0.0
-    fp32a: float = 0.0
-    fp16a: float = 0.0
-    smocc: float = 0.0
-    pcitx: float = 0.0
-    pcirx: float = 0.0
-    nvltx: float = 0.0
-    nvlrx: float = 0.0
-    
-    @classmethod
-    def from_row(cls, row, metrics: List[str]) -> 'MetricValues':
-        """Create MetricValues from a dataframe row"""
-        return cls(
-            gract=getattr(row, 'GRACT', 0.0) if 'GRACT' in metrics else 0.0,
-            drama=getattr(row, 'DRAMA', 0.0) if 'DRAMA' in metrics else 0.0,
-            tenso=getattr(row, 'TENSO', 0.0) if 'TENSO' in metrics else 0.0,
-            fp64a=getattr(row, 'FP64A', 0.0) if 'FP64A' in metrics else 0.0,
-            fp32a=getattr(row, 'FP32A', 0.0) if 'FP32A' in metrics else 0.0,
-            fp16a=getattr(row, 'FP16A', 0.0) if 'FP16A' in metrics else 0.0,
-            smocc=getattr(row, 'SMOCC', 0.0) if 'SMOCC' in metrics else 0.0,
-            pcitx=getattr(row, 'PCITX', 0.0) if 'SMOCC' in metrics else 0.0,
-            pcirx=getattr(row, 'PCIRX', 0.0) if 'SMOCC' in metrics else 0.0,
-            nvltx=getattr(row, 'NVLTX', 0.0) if 'SMOCC' in metrics else 0.0,
-            nvlrx=getattr(row, 'NVLRX', 0.0) if 'SMOCC' in metrics else 0.0,
-        )
-    
-    def get_flop_sum(self) -> float:
-        """Sum of all FLOP-related metrics"""
-        return self.tenso + self.fp64a + self.fp32a + self.fp16a
-
-
-@dataclass
-class TimeComponents:
-    """Container for calculated time components"""
-    t_flop: float = 0.0
-    t_dram: float = 0.0
-    t_kernel: float = 0.0
-    t_othernode: float = 0.0
-    
-    def to_dict(self) -> Dict[str, float]:
-        """Convert to dictionary"""
-        return {
-            't_flop': self.t_flop,
-            't_dram': self.t_dram,
-            't_kernel': self.t_kernel,
-            't_othernode': self.t_othernode
-        }
-
-
-@dataclass
-class TimeSlice:
-    """Container for time-based metrics with slicing functionality"""
-    start_idx: int = 0
-    end_idx: Optional[int] = None
-    
-    def slice_list(self, data: List) -> List:
-        """Apply slicing to a list"""
-        return data[self.start_idx:self.end_idx]
-    
-    def slice_dict(self, data: Dict[str, List]) -> Dict[str, List]:
-        """Apply slicing to all lists in a dictionary"""
-        return {
-            key: values[self.start_idx:self.end_idx]
-            for key, values in data.items()
-        }
-    
-    def slice_dataframe(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Apply slicing to a list"""
-        return data[self.start_idx:self.end_idx]
-
-
-class TimeCalculator:
-    """Handles time-related calculations"""
-    
-    def __init__(self, sample_interval_ms: float):
-        self.sample_intv = sample_interval_ms / 1000
-    
-    def calc_components(self, metrics: MetricValues) -> TimeComponents:
-        """Calculate time components from metrics"""
-        t_flop = self.sample_intv * metrics.get_flop_sum()
-        t_dram = self.sample_intv * metrics.drama
-        t_kernel = self.sample_intv * metrics.gract
-        t_othernode = max(self.sample_intv * (1 - metrics.gract), 0)
-        
-        return TimeComponents(
-            t_flop=t_flop,
-            t_dram=t_dram,
-            t_kernel=t_kernel,
-            t_othernode=t_othernode
-        )
-    
-    def get_time_slice(self, overall_runtime_ms: float, start_ts: Optional[float], 
-                       end_ts: Optional[float], data_length: int) -> TimeSlice:
-        """Calculate time slice indices"""
-        finish_idx = min(
-            int(overall_runtime_ms / (self.sample_intv * 1000)), 
-            data_length
-        )
-        start_idx = int((start_ts or 0) / (self.sample_intv * 1000))
-        
-        if end_ts is not None:
-            end_idx = min(finish_idx, int(end_ts / (self.sample_intv * 1000)))
-            if start_idx > end_idx:
-                raise ValueError("End timestamp is earlier than start timestamp")
-        else:
-            end_idx = finish_idx
-        
-        return TimeSlice(start_idx=start_idx, end_idx=end_idx)
-
-
-class MetricIntensityCalculator:
-    """Calculates computational intensities"""
-    
-    def metric_intensities(self, metrics: MetricValues) -> Dict[str, float]:
-        """Calculate all intensity metrics"""
-        if metrics.gract < 0.01:
-            return {
-                'drama_gract': 0.0, 'tenso_gract': 0.0, 'fp64a_gract': 0.0, 
-                'fp32a_gract': 0.0, 'fp16a_gract': 0.0, 'smocc_gract': 0.0
-            }
-        
-        return {
-            'drama_gract': metrics.drama / metrics.gract,
-            'tenso_gract': metrics.tenso / metrics.gract,
-            'fp64a_gract': metrics.fp64a / metrics.gract,
-            'fp32a_gract': metrics.fp32a / metrics.gract,
-            'fp16a_gract': metrics.fp16a / metrics.gract,
-            'smocc_gract': metrics.smocc / metrics.gract
-        }
-
-
-class ScaleCalculator:
-    """Calculates computational intensities"""
-
-    INTENSITY_THRESHOLD = 0.01
-
-    def __init__(self, ref_gpu: GPU, tgt_gpu: GPU, tensor_prec: str):
-        self.ref_gpu = ref_gpu
-        self.tgt_gpu = tgt_gpu
-        
-        # Precompute ratios
-        self._compute_ratios(tensor_prec)
-
-        # Initialize state
-        self.cur_smocc = 0
-        self.cur_warps_ref = 0
-        self.cur_warps_tgt = {'lower': 0, 'mid': 0, 'upper': 0}
-        self.scale_smocc = {'lower': 0, 'mid': 0, 'upper': 0}
-
-    def _compute_ratios(self, tensor_prec: str):
-        """Compute all GPU spec ratios once during initialization"""
-        self.reg_sm_limit = self._get_ratio("reg_size_sm")
-        self.shmem_sm_limit = self._get_ratio("shmem_sm")
-        self.bw_ratio = self._get_ratio("mem_bw")
-        self.tensor_ratio = self._get_ratio(tensor_prec)
-        self.fp64_ratio = self._get_ratio("fp64")
-        self.fp32_ratio = self._get_ratio("fp32")
-        self.fp16_ratio = self._get_ratio("fp16")
-
-    def _get_ratio(self, spec: str) -> float:
-        """Helper to compute target/reference ratio for a given spec"""
-        return self.tgt_gpu.get_specs(spec) / self.ref_gpu.get_specs(spec)
-
-    def _estimate_warps(self):
-        ref_max_warps = self.ref_gpu.get_specs("max_warps_sm")
-        tgt_max_warps = self.tgt_gpu.get_specs("max_warps_sm")
-
-        self.cur_warps_ref = self.cur_smocc * ref_max_warps
-
-        self.cur_warps_tgt['lower'] = min(
-            self.cur_warps_ref * self.reg_sm_limit,
-            self.cur_warps_ref * self.shmem_sm_limit,
-            tgt_max_warps
-        )
-        
-        self.cur_warps_tgt['mid'] = min(
-            self.cur_warps_ref * (self.reg_sm_limit + self.shmem_sm_limit) * 0.5,
-            tgt_max_warps
-        )   
-
-        self.cur_warps_tgt['upper'] = min(
-            max(self.cur_warps_ref * self.reg_sm_limit,
-                self.cur_warps_ref * self.shmem_sm_limit),
-            tgt_max_warps
-        )
-        
-    def refresh_smocc(self, smocc_ref: float):
-        self.cur_smocc = smocc_ref
-        self._estimate_warps()
-
-    def smocc_scale(self) -> Tuple[float, float, float]:
-        """Calculate SM occupancy scaling factors"""
-        k_smocc_ref = self._compute_k_smocc(self.cur_warps_ref, self.ref_gpu)
-        
-        for level in ['lower', 'mid', 'upper']:
-            k_smocc_tgt = self._compute_k_smocc(self.cur_warps_tgt[level], self.tgt_gpu)
-            self.scale_smocc[level] = k_smocc_tgt / k_smocc_ref if k_smocc_ref != 0 else 0
-        
-        return self.scale_smocc['lower'], self.scale_smocc['mid'], self.scale_smocc['upper']
-
-    def est_dram_tgt(self, drama_ref: float) -> Tuple[float, float, float]:
-        return (
-            min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['lower'], self.tgt_gpu["mem_bw"]),
-            min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['mid'], self.tgt_gpu["mem_bw"]),
-            min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['upper'], self.tgt_gpu["mem_bw"])
-        )
-
-    def est_flop_tgt(self, tenso_ref: float, fp64a_ref: float, fp32a_ref: float, fp16a_ref: float, tf_prec: str) -> Tuple[float, float, float]:
-        flop_tgt_lower = flop_tgt_mid = flop_tgt_upper = 0
-        for mv, spec in [(tenso_ref, tf_prec), (fp64a_ref, 'fp64'), (fp32a_ref, 'fp32'), (fp16a_ref, 'fp16')]:
-            flop_tgt_lower += min(self.ref_gpu[spec] * mv * self.scale_smocc['lower'], self.tgt_gpu[spec])
-            flop_tgt_mid += min(self.ref_gpu[spec] * mv * self.scale_smocc['mid'], self.tgt_gpu[spec])
-            flop_tgt_upper += min(self.ref_gpu[spec] * mv * self.scale_smocc['upper'], self.tgt_gpu[spec])
-        
-        return flop_tgt_lower, flop_tgt_mid, flop_tgt_upper
-
-    def _compute_k_smocc(self, warps: float, gpu: GPU) -> float:
-        """Compute k_smocc value for given warps and GPU"""
-        return warps * gpu.get_specs("num_sm") * gpu.get_specs("boost_clock")
-
-    def dram_scale(self, dram_ref: float) -> Tuple[float, float, float]:
-        """Calculate DRAM bandwidth scaling factors"""
-        return self._compute_scale(dram_ref, self.bw_ratio)
-
-    def tensor_scale(self, tensor_ref: float) -> Tuple[float, float, float]:
-        """Calculate tensor core scaling factors"""
-        return self._compute_scale(tensor_ref, self.tensor_ratio)
-
-    def fp64_scale(self, fp64_ref: float) -> Tuple[float, float, float]:
-        """Calculate FP64 scaling factors"""
-        return self._compute_scale(fp64_ref, self.fp64_ratio)
-    
-    def fp32_scale(self, fp32_ref: float) -> Tuple[float, float, float]:
-        """Calculate FP32 scaling factors"""
-        return self._compute_scale(fp32_ref, self.fp32_ratio)
-
-    def fp16_scale(self, fp16_ref: float) -> Tuple[float, float, float]:
-        """Calculate FP16 scaling factors"""
-        return self._compute_scale(fp16_ref, self.fp16_ratio)
-
-    def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float]:
-        """Generic method to compute scaling factors for any intensity metric"""
-        if intensity_ref < self.INTENSITY_THRESHOLD:
-            return np.inf, np.inf, np.inf
-        
-        scale_factor = ratio / intensity_ref
-        return (
-            min(self.scale_smocc['lower'], scale_factor),
-            min(self.scale_smocc['mid'], scale_factor),
-            min(self.scale_smocc['upper'], scale_factor)
-        )
-
-class ResultsFormatter:
-    """Formats and prints results"""
-    
-    @staticmethod
-    def print_reference_results(metrics: Dict[str, List[float]], flops: float, mem_bw: float, gpu_name: str):
-        """Print reference hardware results"""
-        print(f"\n{'='*60}")
-        print(f"Reference Hardware: {gpu_name}\n")
-        print(f"Estimated TFLOPS: {flops:.2f}")
-        print(f"Estimated GPU Memory Bandwidth: {mem_bw:.2f} GB/s")
-        
-        print(f"\nEstimated Kernel Time: {sum(metrics['t_kernel']):.2f} s")
-        print(f"Estimated Other Node Time: {sum(metrics['t_othernode']):.2f} s")
-        print(f"Estimated Total Runtime: {sum(metrics['t_total']):.2f} s")
-        print(f"{'='*60}\n")
-    
-    @staticmethod
-    def print_target_results(metrics: Dict[str, List[float]], flops: Dict[str, float], mem_bw: Dict[str, float], gpu_name: str):
-        """Print target hardware results"""
-        print(f"\n{'='*60}")
-        print(f"Target Hardware: {gpu_name}")
-        
-        print(f'Estimated TFLOPS [Lower SMOCC]: {flops.get("flop_smocc_lower"):.2f} GB/s')
-        print(f'Estimated TFLOPS [Mid SMOCC]: {flops.get("flop_smocc_mid"):.2f} GB/s')
-        print(f'Estimated TFLOPS [Upper SMOCC]: {flops.get("flop_smocc_upper"):.2f} GB/s')
-        
-        print(f'Estimated GPU Memory Bandwidth [Lower SMOCC]: {mem_bw.get("dram_smocc_lower"):.2f} GB/s')
-        print(f'Estimated GPU Memory Bandwidth [Mid SMOCC]: {mem_bw.get("dram_smocc_mid"):.2f} GB/s')
-        print(f'Estimated GPU Memory Bandwidth [Upper SMOCC]: {mem_bw.get("dram_smocc_upper"):.2f} GB/s')
-
-        print(f"\nEstimated Kernel Time [Lower SMOCC]: {sum(metrics['t_kernel_lower']):.2f} s")
-        print(f"Estimated Kernel Time [Mid SMOCC]:   {sum(metrics['t_kernel_mid']):.2f} s")
-        print(f"Estimated Kernel Time [Upper SMOCC]: {sum(metrics['t_kernel_upper']):.2f} s")
-        
-        print(f"\nEstimated Other Node Time: {sum(metrics['t_othernode']):.2f} s")
-        
-        print(f"\nEstimated Total Runtime [Lower SMOCC]: {sum(metrics['t_total_lower']):.2f} s")
-        print(f"Estimated Total Runtime [Mid SMOCC]:   {sum(metrics['t_total_mid']):.2f} s")
-        print(f"Estimated Total Runtime [Upper SMOCC]: {sum(metrics['t_total_upper']):.2f} s")
-        print(f"{'='*60}\n")
+from data_classes import MetricValues, TimeComponents, TimeSlice
+from performance_calculators import MetricIntensityCalculator, ScaleCalculator, TimeCalculator
+from metric_processor import MetricsProcessor
+from utils import ResultsFormatter
 
 
 class BaseProfiler(ABC):
     """Abstract base class for profilers"""
     
-    def __init__(self, sample_interval_ms: float):
-        self.time_calc = TimeCalculator(sample_interval_ms)
+    def __init__(self, sample_interval_ms: float, ref_gpu: GPU):
+        self.time_calc = TimeCalculator(sample_interval_ms, ref_gpu)
         self.intensity_calc = MetricIntensityCalculator()
         self.formatter = ResultsFormatter()
         
@@ -415,7 +30,7 @@ class ReferenceProfiler(BaseProfiler):
     """Profiles performance on reference hardware"""
     def __init__(self, sample_interval_ms, gpu_name):
         self.gpu = GPU(gpu_name=gpu_name)
-        super().__init__(sample_interval_ms)
+        super().__init__(sample_interval_ms, self.gpu)
 
     def run(self, profiled_df: pd.DataFrame, metrics: List[str], 
             overall_runtime_ms: float, start_ts: Optional[float], 
@@ -442,7 +57,7 @@ class ReferenceProfiler(BaseProfiler):
     def _calc_all_components(self, profiled_df: pd.DataFrame, metrics: List[str]) -> List[TimeComponents]:
         """Calculate time components for all rows"""
         return [
-            self.time_calc.calc_components(MetricValues.from_row(row, metrics))
+            self.time_calc.calc_components_sg(MetricValues.from_row(row, metrics))
             for row in profiled_df.itertuples(index=False)
         ]
     
@@ -491,7 +106,7 @@ class TargetPredictor(BaseProfiler):
     def __init__(self, sample_interval_ms, ref_gpu_name, tgt_gpu_name):
         self.ref_gpu = GPU(gpu_name=ref_gpu_name)
         self.tgt_gpu = GPU(gpu_name=tgt_gpu_name)
-        super().__init__(sample_interval_ms)
+        super().__init__(sample_interval_ms, self.ref_gpu)
 
     def run(self, profiled_df: pd.DataFrame, metrics: List[str],
             overall_runtime_ms: float, start_ts: Optional[float], 
@@ -499,7 +114,7 @@ class TargetPredictor(BaseProfiler):
         """Predict performance on target hardware"""        
         # Calculate target metrics
         target_metrics = self._calc_target_metrics(
-            profiled_df, metrics, self.ref_gpu, self.tgt_gpu, tensor_prec
+            profiled_df, metrics, tensor_prec
         )
         
         # Get time slice
@@ -517,8 +132,7 @@ class TargetPredictor(BaseProfiler):
         # Print predictions
         self.formatter.print_target_results(sliced_metrics, est_flops, est_membw, self.tgt_gpu.get_name())
     
-    def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str],
-                             ref_gpu: GPU, tgt_gpu: GPU, tensor_prec: str) -> Dict[str, List[float]]:
+    def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str], tensor_prec: str) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
         results = {
             't_kernel_lower': [], 't_kernel_upper': [], 't_kernel_mid': [],
@@ -528,7 +142,7 @@ class TargetPredictor(BaseProfiler):
             'total_flop_tgt_lower': [], 'total_flop_tgt_mid': [], 'total_flop_tgt_upper': []
         }
         
-        scale_calc = ScaleCalculator(ref_gpu, tgt_gpu, tensor_prec)
+        scale_calc = ScaleCalculator(self.ref_gpu, self.tgt_gpu, tensor_prec)
         
         for row in profiled_df.itertuples(index=False):
             mv = MetricValues.from_row(row, metrics)
@@ -544,7 +158,7 @@ class TargetPredictor(BaseProfiler):
             intensities = self.intensity_calc.metric_intensities(mv)
 
             # Calculate reference components
-            ref_components = self.time_calc.calc_components(mv)
+            ref_components = self.time_calc.calc_components_sg(mv)
             
             # Estimate Warps on target GPU
             scale_calc.refresh_smocc(intensities['smocc_gract'])
@@ -634,7 +248,8 @@ def main():
     args = parse_arguments()
     
     # Process metrics file
-    profiled_df = MetricsProcessor.process_file(args.dcgm_file, args.metrics)
+    metrics_processor = MetricsProcessor(1, args.metrics)
+    profiled_df = metrics_processor.process_files(args.dcgm_file)
 
     # Create and run reference profiler
     ref_profiler = ReferenceProfiler(args.sample_interval_ms, args.ref_gpu)
