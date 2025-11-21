@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from gpu_specs import GPU, GPUSpec
 from data_classes import MetricValues, TimeComponents, TimeSlice
 from performance_calculators import MetricIntensityCalculator, ScaleCalculator, TimeCalculator
-from metric_processor import MetricsProcessor
+from job_processor import JobProcessor 
 from utils import ResultsFormatter
 
 
@@ -247,9 +247,9 @@ def parse_arguments() -> argparse.Namespace:
 def main():
     args = parse_arguments()
     
-    # Process metrics file
-    metrics_processor = MetricsProcessor(1, args.metrics)
-    profiled_df = metrics_processor.process_files(args.dcgm_file)
+    # Process metrics file for a job
+    job_processor = JobProcessor(1, args.metrics)
+    profiled_df = job_processor.process_files(args.dcgm_file)
 
     # Create and run reference profiler
     ref_profiler = ReferenceProfiler(args.sample_interval_ms, args.ref_gpu)

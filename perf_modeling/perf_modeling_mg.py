@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from gpu_specs import GPU, GPUSpec
 from data_classes import MetricValues, TimeComponents, TimeSlice
-from metric_processor import MetricsProcessor
+from job_processor import JobProcessor
 from performance_calculators import MetricIntensityCalculator, ScaleCalculator, TimeCalculator
 from utils import ResultsFormatter
 
@@ -330,9 +330,9 @@ def parse_arguments() -> argparse.Namespace:
 def main():
     args = parse_arguments()
     
-    # Process metrics file
-    metrics_processor = MetricsProcessor(args.num_gpu, args.metrics)
-    gpu_dfs = metrics_processor.process_files(args.dcgm_input)
+    # Process metrics file for multiple jobs
+    job_processor = JobProcessor(args.num_gpu, args.metrics)
+    gpu_dfs = job_processor.process_files(args.dcgm_input)
 
     print(f"\nProcessed {len(gpu_dfs)} GPUs")
     for i, df in enumerate(gpu_dfs):

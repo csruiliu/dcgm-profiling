@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 from collections import Counter
 
 
-class MetricsProcessor:
+class JobProcessor:
     """Handles metrics file processing"""
     GPU_PATTERN = re.compile(r'^GPU \d+\s')
     HEADER_PATTERN = re.compile(r'^#Entity')
