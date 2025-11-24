@@ -49,7 +49,7 @@ class TimeComponents:
     t_kernel: float = 0.0
     t_nvlink: float = 0.0
     t_othernode: float = 0.0
-    
+
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary"""
         return {

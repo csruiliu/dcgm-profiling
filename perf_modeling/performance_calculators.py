@@ -101,51 +101,53 @@ class ScaleCalculator:
         self.ref_gpu = ref_gpu
         self.tgt_gpu = tgt_gpu
         
-        # Precompute ratios
-        self._compute_ratios(tensor_prec)
+        # Precompute all ratios and limits
+        self._precompute_all_ratios(tensor_prec)
 
         # Initialize state
         self.cur_smocc = 0
         self.cur_warps_ref = 0
-        self.cur_warps_tgt = {'lower': 0, 'mid': 0, 'upper': 0}
-        self.scale_smocc = {'lower': 0, 'mid': 0, 'upper': 0}
+        self.cur_warps_tgt = {'lower': 0, 'mid': 0, 'upper': 0, 'mock': 0}
+        self.scale_smocc = {'lower': 0, 'mid': 0, 'upper': 0, 'mock': 0}
 
-    def _compute_ratios(self, tensor_prec: str):
+    def _precompute_all_ratios(self, tensor_prec: str):
         """Compute all GPU spec ratios once during initialization"""
         self.reg_sm_limit = self._get_ratio("reg_size_sm")
         self.shmem_sm_limit = self._get_ratio("shmem_sm")
         self.bw_ratio = self._get_ratio("mem_bw")
-        self.tensor_ratio = self._get_ratio(tensor_prec)
         self.fp64_ratio = self._get_ratio("fp64")
         self.fp32_ratio = self._get_ratio("fp32")
         self.fp16_ratio = self._get_ratio("fp16")
+        self.tensor_ratio = self._get_ratio(tensor_prec)
+
+        # Store specs locally to avoid repeated method calls
+        self.ref_max_warps = self.ref_gpu.get_specs("max_warps_sm")
+        self.tgt_max_warps = self.tgt_gpu.get_specs("max_warps_sm")
 
     def _get_ratio(self, spec: str) -> float:
         """Helper to compute target/reference ratio for a given spec"""
         return self.tgt_gpu.get_specs(spec) / self.ref_gpu.get_specs(spec)
 
     def _estimate_warps(self):
-        ref_max_warps = self.ref_gpu.get_specs("max_warps_sm")
-        tgt_max_warps = self.tgt_gpu.get_specs("max_warps_sm")
-
-        self.cur_warps_ref = self.cur_smocc * ref_max_warps
+        self.cur_warps_ref = min(self.cur_smocc * self.ref_max_warps, self.ref_max_warps)
 
         self.cur_warps_tgt['lower'] = min(
             self.cur_warps_ref * self.reg_sm_limit,
             self.cur_warps_ref * self.shmem_sm_limit,
-            tgt_max_warps
+            self.tgt_max_warps
         )
         
         self.cur_warps_tgt['mid'] = min(
             self.cur_warps_ref * (self.reg_sm_limit + self.shmem_sm_limit) * 0.5,
-            tgt_max_warps
+            self.tgt_max_warps
         )   
 
         self.cur_warps_tgt['upper'] = min(
             max(self.cur_warps_ref * self.reg_sm_limit,
                 self.cur_warps_ref * self.shmem_sm_limit),
-            tgt_max_warps
+            self.tgt_max_warps
         )
+        self.cur_warps_tgt['mock'] = self.cur_warps_ref
         
     def refresh_smocc(self, smocc_ref: float):
         self.cur_smocc = smocc_ref
@@ -155,27 +157,30 @@ class ScaleCalculator:
         """Calculate SM occupancy scaling factors"""
         k_smocc_ref = self._compute_k_smocc(self.cur_warps_ref, self.ref_gpu)
         
-        for level in ['lower', 'mid', 'upper']:
+        for level in ['lower', 'mid', 'upper', 'mock']:
+            # print(f"{level}: {self.cur_warps_tgt[level]}")
             k_smocc_tgt = self._compute_k_smocc(self.cur_warps_tgt[level], self.tgt_gpu)
             self.scale_smocc[level] = k_smocc_tgt / k_smocc_ref if k_smocc_ref != 0 else 0
         
-        return self.scale_smocc['lower'], self.scale_smocc['mid'], self.scale_smocc['upper']
+        return self.scale_smocc['lower'], self.scale_smocc['mid'], self.scale_smocc['upper'], self.scale_smocc['mock']
 
     def est_dram_tgt(self, drama_ref: float) -> Tuple[float, float, float]:
         return (
             min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['lower'], self.tgt_gpu["mem_bw"]),
             min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['mid'], self.tgt_gpu["mem_bw"]),
-            min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['upper'], self.tgt_gpu["mem_bw"])
+            min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['upper'], self.tgt_gpu["mem_bw"]),
+            min(self.ref_gpu["mem_bw"] * drama_ref * self.scale_smocc['mock'], self.tgt_gpu["mem_bw"])
         )
 
     def est_flop_tgt(self, tenso_ref: float, fp64a_ref: float, fp32a_ref: float, fp16a_ref: float, tf_prec: str) -> Tuple[float, float, float]:
-        flop_tgt_lower = flop_tgt_mid = flop_tgt_upper = 0
+        flop_tgt_lower = flop_tgt_mid = flop_tgt_upper = flop_tgt_mock = 0
         for mv, spec in [(tenso_ref, tf_prec), (fp64a_ref, 'fp64'), (fp32a_ref, 'fp32'), (fp16a_ref, 'fp16')]:
             flop_tgt_lower += min(self.ref_gpu[spec] * mv * self.scale_smocc['lower'], self.tgt_gpu[spec])
             flop_tgt_mid += min(self.ref_gpu[spec] * mv * self.scale_smocc['mid'], self.tgt_gpu[spec])
             flop_tgt_upper += min(self.ref_gpu[spec] * mv * self.scale_smocc['upper'], self.tgt_gpu[spec])
+            flop_tgt_mock += min(self.ref_gpu[spec] * mv * self.scale_smocc['mock'], self.tgt_gpu[spec])
         
-        return flop_tgt_lower, flop_tgt_mid, flop_tgt_upper
+        return flop_tgt_lower, flop_tgt_mid, flop_tgt_upper, flop_tgt_mock
 
     def _compute_k_smocc(self, warps: float, gpu: GPU) -> float:
         """Compute k_smocc value for given warps and GPU"""
@@ -204,11 +209,8 @@ class ScaleCalculator:
     def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float]:
         """Generic method to compute scaling factors for any intensity metric"""
         if intensity_ref < self.INTENSITY_THRESHOLD:
-            return np.inf, np.inf, np.inf
+            return np.inf, np.inf, np.inf, np.inf
         
         scale_factor = ratio / intensity_ref
-        return (
-            min(self.scale_smocc['lower'], scale_factor),
-            min(self.scale_smocc['mid'], scale_factor),
-            min(self.scale_smocc['upper'], scale_factor)
-        )
+        return tuple(min(self.scale_smocc[key], scale_factor) 
+                     for key in ('lower', 'mid', 'upper', 'mock'))

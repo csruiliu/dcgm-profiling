@@ -135,24 +135,29 @@ class TargetPredictor(BaseProfiler):
     def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str], tensor_prec: str) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
         results = {
-            't_kernel_lower': [], 't_kernel_upper': [], 't_kernel_mid': [],
-            't_othernode': [], 't_total_lower': [], 't_total_upper': [], 't_total_mid': [],
-            'drama_ref': [], 'tensor_ref': [], 'fp64a_ref': [], 'fp32a_ref': [], 'fp16a_ref': [],
-            'total_dram_tgt_lower': [], 'total_dram_tgt_mid': [], 'total_dram_tgt_upper': [],
-            'total_flop_tgt_lower': [], 'total_flop_tgt_mid': [], 'total_flop_tgt_upper': []
+            't_kernel_lower': [], 
+            't_kernel_upper': [], 
+            't_kernel_mid': [], 
+            't_kernel_mock': [],
+            't_othernode': [], 
+            't_total_lower': [], 
+            't_total_upper': [], 
+            't_total_mid': [], 
+            't_total_mock': [],
+            'total_dram_tgt_lower': [], 
+            'total_dram_tgt_mid': [], 
+            'total_dram_tgt_upper': [], 
+            'total_dram_tgt_mock': [],
+            'total_flop_tgt_lower': [], 
+            'total_flop_tgt_mid': [], 
+            'total_flop_tgt_upper': [], 
+            'total_flop_tgt_mock': [],
         }
         
         scale_calc = ScaleCalculator(self.ref_gpu, self.tgt_gpu, tensor_prec)
         
         for row in profiled_df.itertuples(index=False):
             mv = MetricValues.from_row(row, metrics)
-            
-            # Store reference metrics
-            results['drama_ref'].append(mv.drama)
-            results['tensor_ref'].append(mv.tenso)
-            results['fp64a_ref'].append(mv.fp64a)
-            results['fp32a_ref'].append(mv.fp32a)
-            results['fp16a_ref'].append(mv.fp16a)
             
             # Calculate intensities
             intensities = self.intensity_calc.metric_intensities(mv)
@@ -164,25 +169,27 @@ class TargetPredictor(BaseProfiler):
             scale_calc.refresh_smocc(intensities['smocc_gract'])
             
             # Calculate kernel scales using smocc, dram, tensor, fp64, fp32, fp16
-            smocc_lower, smocc_mid, smocc_upper = scale_calc.smocc_scale()
-            dram_lower, dram_mid, dram_upper = scale_calc.dram_scale(intensities['drama_gract'])
-            tensor_lower, tensor_mid, tensor_upper = scale_calc.tensor_scale(intensities['tenso_gract'])
-            fp64_lower, fp64_mid, fp64_upper = scale_calc.fp64_scale(intensities['fp64a_gract'])
-            fp32_lower, fp32_mid, fp32_upper = scale_calc.fp32_scale(intensities['fp32a_gract'])
-            fp16_lower, fp16_mid, fp16_upper = scale_calc.fp16_scale(intensities['fp16a_gract'])
+            smocc_lower, smocc_mid, smocc_upper, smocc_mock = scale_calc.smocc_scale()
+            dram_lower, dram_mid, dram_upper, dram_mock = scale_calc.dram_scale(intensities['drama_gract'])
+            tensor_lower, tensor_mid, tensor_upper, tensor_mock = scale_calc.tensor_scale(intensities['tenso_gract'])
+            fp64_lower, fp64_mid, fp64_upper, fp64_mock = scale_calc.fp64_scale(intensities['fp64a_gract'])
+            fp32_lower, fp32_mid, fp32_upper, fp32_mock = scale_calc.fp32_scale(intensities['fp32a_gract'])
+            fp16_lower, fp16_mid, fp16_upper, fp16_mock = scale_calc.fp16_scale(intensities['fp16a_gract'])
             
             # Estimate bandwidth and flop
-            dram_lower_tgt, dram_mid_tgt, dram_upper_tgt = scale_calc.est_dram_tgt(intensities['drama_gract'])  
-            flop_lower_tgt, flop_mid_tgt, flop_upper_tgt = scale_calc.est_flop_tgt(
+            dram_lower_tgt, dram_mid_tgt, dram_upper_tgt, dram_mock_tgt = scale_calc.est_dram_tgt(intensities['drama_gract'])  
+            flop_lower_tgt, flop_mid_tgt, flop_upper_tgt, flop_mock_tgt = scale_calc.est_flop_tgt(
                 intensities['tenso_gract'], intensities['fp64a_gract'], intensities['fp32a_gract'], intensities['fp16a_gract'], tensor_prec
             )
             for key, value in {
                 'total_dram_tgt_lower': dram_lower_tgt,
                 'total_dram_tgt_mid': dram_mid_tgt,
                 'total_dram_tgt_upper': dram_upper_tgt,
+                'total_dram_tgt_mock': dram_mock_tgt,
                 'total_flop_tgt_lower': flop_lower_tgt,
                 'total_flop_tgt_mid': flop_mid_tgt,
                 'total_flop_tgt_upper': flop_upper_tgt,
+                'total_flop_tgt_mock': flop_mock_tgt,
             }.items():
                 results[key].append(value)
 
@@ -190,9 +197,10 @@ class TargetPredictor(BaseProfiler):
             kernel_scale_lower = min(smocc_lower, dram_lower, tensor_lower, fp64_lower, fp32_lower, fp16_lower)
             kernel_scale_mid = min(smocc_mid, dram_mid, tensor_mid, fp64_mid, fp32_mid, fp16_mid)
             kernel_scale_upper = min(smocc_upper, dram_upper, tensor_upper, fp64_upper, fp32_upper, fp16_upper)
+            kernel_scale_mock = min(smocc_mock, dram_mock, tensor_mock, fp64_mock, fp32_mock, fp16_mock)
 
             # Calculate kernel times for each scenario
-            for scale, suffix in [(kernel_scale_lower, 'lower'), (kernel_scale_mid, 'mid'), (kernel_scale_upper, 'upper')]:
+            for scale, suffix in [(kernel_scale_lower, 'lower'), (kernel_scale_mid, 'mid'), (kernel_scale_upper, 'upper'), (kernel_scale_mock, 'mock')]:
                 t_kernel = ref_components.t_kernel / scale if scale != 0 else 0
                 results[f't_kernel_{suffix}'].append(t_kernel)
             
@@ -204,6 +212,7 @@ class TargetPredictor(BaseProfiler):
             results['t_total_lower'].append(results['t_kernel_lower'][-1] + t_othernode)
             results['t_total_mid'].append(results['t_kernel_mid'][-1] + t_othernode)
             results['t_total_upper'].append(results['t_kernel_upper'][-1] + t_othernode)
+            results['t_total_mock'].append(results['t_kernel_mock'][-1] + t_othernode)
 
         return results
         
@@ -212,7 +221,8 @@ class TargetPredictor(BaseProfiler):
         return {
             "flop_smocc_lower": np.mean(results.get('total_flop_tgt_lower')),
             "flop_smocc_mid": np.mean(results.get('total_flop_tgt_mid')),
-            "flop_smocc_upper": np.mean(results.get('total_flop_tgt_upper'))
+            "flop_smocc_upper": np.mean(results.get('total_flop_tgt_upper')),
+            "flop_smocc_mock": np.mean(results.get('total_flop_tgt_mock'))
         }
     
     def _calc_est_membw(self, results: Dict[str, List]) -> Dict[str, float]:
@@ -220,7 +230,8 @@ class TargetPredictor(BaseProfiler):
         return {
             "dram_smocc_lower": np.mean(results.get('total_dram_tgt_lower')),
             "dram_smocc_mid": np.mean(results.get('total_dram_tgt_mid')),
-            "dram_smocc_upper": np.mean(results.get('total_dram_tgt_upper'))
+            "dram_smocc_upper": np.mean(results.get('total_dram_tgt_upper')),
+            "dram_smocc_mock": np.mean(results.get('total_dram_tgt_mock'))
         }
 
 
