@@ -44,11 +44,11 @@ GPUSpec = {
         "base_clock": 1395, "boost_clock": 1770, "mem_clock": 1750,
         "max_warps_sm": 32, "reg_size_sm": 256, "shmem_sm": 96, "num_sm": 72
     },
-    "2080TI": {
-        "fp64": 0.42, "tf64": 0, "fp32": 13.45, "tf32": 53.8, "fp16": 26.9, "tf16": 107.6, 
-        "mem_bw": 616, "pcie_bw": 15.75, "nvlink_bw": 100, 
-        "base_clock": 1350, "boost_clock": 1545, "mem_clock": 1750,
-        "max_warps_sm": 32, "reg_size_sm": 256, "shmem_sm": 96, "num_sm": 68
+    "V100-SXM2": {
+        "fp64": 7.8, "tf64": 0, "fp32": 15.7, "tf32": 0, "fp16": 31.3, "tf16": 125, 
+        "mem_bw": 900, "pcie_bw": 15.75, "nvlink_bw": 100, 
+        "base_clock": 1312, "boost_clock": 1530, "mem_clock": 876,
+        "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 96, "num_sm": 80
     }
 }
 
