@@ -220,33 +220,12 @@ class TargetPredictor(BaseProfiler):
             'fp16': scale_calc.fp16_scale(intensities['fp16a_gract'])
         }
 
-
     def _calc_aggregated_metrics(self, results: Dict[str, List], 
                                  source_prefix: str, target_prefix: str) -> Dict[str, float]:
         """Generic method to calculate aggregated metrics (FLOPS or memory bandwidth)"""
         return {
             f"{target_prefix}_{key}": np.mean(results[f'{source_prefix}_{key}'])
             for key in self.SMOCC_LEVELS
-        }
-
-
-
-    def _calc_est_flops(self, results: Dict[str, List]) -> Dict[str, float]:
-        """Calculate estimated FLOPS"""
-        return {
-            "flop_smocc_lower": np.mean(results.get('total_flop_tgt_lower')),
-            "flop_smocc_mid": np.mean(results.get('total_flop_tgt_mid')),
-            "flop_smocc_upper": np.mean(results.get('total_flop_tgt_upper')),
-            "flop_smocc_mock": np.mean(results.get('total_flop_tgt_mock'))
-        }
-    
-    def _calc_est_membw(self, results: Dict[str, List]) -> Dict[str, float]:
-        """Calculate estimated memory bandwidth"""
-        return {
-            "dram_smocc_lower": np.mean(results.get('total_dram_tgt_lower')),
-            "dram_smocc_mid": np.mean(results.get('total_dram_tgt_mid')),
-            "dram_smocc_upper": np.mean(results.get('total_dram_tgt_upper')),
-            "dram_smocc_mock": np.mean(results.get('total_dram_tgt_mock'))
         }
 
 
