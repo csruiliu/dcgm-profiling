@@ -10,13 +10,13 @@ from typing import Dict
 GPUSpec = {
     "A100-40": {
         "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
-        "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, "l2_cache": 40
+        "mem_bw": 1555, "pcie_bw": 64, "nvlink_bw": 600, "l2_cache": 40,
         "base_clock": 765, "boost_clock": 1410, "mem_clock": 1215,
         "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 164, "num_sm": 108
     },
     "A100-80": {
         "fp64": 9.7, "tf64": 19.5, "fp32": 19.5, "tf32": 156, "fp16": 78, "tf16": 312, 
-        "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, "l2_cache": 40
+        "mem_bw": 1935, "pcie_bw": 64, "nvlink_bw": 600, "l2_cache": 40,
         "base_clock": 1065, "boost_clock": 1410, "mem_clock": 1512,
         "max_warps_sm": 64, "reg_size_sm": 256, "shmem_sm": 164, "num_sm": 108 
     },
