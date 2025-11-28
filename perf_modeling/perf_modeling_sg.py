@@ -208,8 +208,7 @@ class TargetPredictor(BaseProfiler):
 
         return results
         
-    def _calculate_all_scales(self, scale_calc: ScaleCalculator, 
-                              intensities: Dict, tf_weights: Dict) -> Dict[str, tuple]:
+    def _calculate_all_scales(self, scale_calc: ScaleCalculator, intensities: Dict, tf_weights: Dict) -> Dict[str, tuple]:
         """Calculate all scale factors in one place"""
         # scale_calc.smocc_scale() need to be invoked first
         return {
