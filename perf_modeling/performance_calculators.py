@@ -159,7 +159,7 @@ class ScaleCalculator:
         """Compute k_smocc value for given warps and GPU"""
         return warps * gpu.get_specs("num_sm") * gpu.get_specs("boost_clock")
 
-    def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float]:
+    def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float, float]:
         """Generic method to compute scaling factors for any intensity metric"""
         if intensity_ref < self.INTENSITY_THRESHOLD:
             return np.inf, np.inf, np.inf, np.inf
@@ -185,24 +185,39 @@ class ScaleCalculator:
                          for prec in ['tf64', 'tf32', 'tf16'])
 
         return self._compute_scale(tensor_ref, tf_tgt / tf_ref)
-
+    
     def dram_scale(self, dram_ref: float) -> Tuple[float, float, float]:
         """Calculate DRAM bandwidth scaling factors"""
         return self._compute_scale(dram_ref, self.bw_ratio)
+    '''
+    def dram_scale(self, intensities: Dict) -> Tuple[float, float, float, float]:
+        """Calculate DRAM bandwidth scaling factors"""
+        if intensities['drama_gract'] < self.INTENSITY_THRESHOLD:
+            return np.inf, np.inf, np.inf, np.inf
+        
+        scale_factor = self.bw_ratio / intensities['drama_gract']
+        l2_cache_ratio = self.tgt_gpu.get_specs("l2_cache") / self.ref_gpu.get_specs("l2_cache")
 
-    def fp64_scale(self, fp64_ref: float) -> Tuple[float, float, float]:
+        def calculate_lambda_factor(key):
+            l_factor = 1 / (1 - intensities['smocc_gract'] * (l2_cache_ratio - 1))
+            return min(self.scale_smocc[key], scale_factor) * l_factor
+            
+        return tuple(calculate_lambda_factor(key) for key in ['lower', 'mid', 'upper', 'mock'])
+    '''
+        
+    def fp64_scale(self, fp64_ref: float) -> Tuple[float, float, float, float]:
         """Calculate FP64 scaling factors"""
         return self._compute_scale(fp64_ref, self.fp64_ratio)
 
-    def fp32_scale(self, fp32_ref: float) -> Tuple[float, float, float]:
+    def fp32_scale(self, fp32_ref: float) -> Tuple[float, float, float, float]:
         """Calculate FP32 scaling factors"""
         return self._compute_scale(fp32_ref, self.fp32_ratio)
 
-    def fp16_scale(self, fp16_ref: float) -> Tuple[float, float, float]:
+    def fp16_scale(self, fp16_ref: float) -> Tuple[float, float, float, float]:
         """Calculate FP16 scaling factors"""
         return self._compute_scale(fp16_ref, self.fp16_ratio)
     
-    def est_flop_tgt(self, tf_weights: Dict[str, float], intensities: Dict[str, float], smocc_scale: float) -> Tuple[float, float, float]:
+    def est_flop_tgt(self, tf_weights: Dict[str, float], intensities: Dict[str, float], smocc_scale: float) -> Tuple[float, float, float, float]:
         # Compute tf_tgt once
         tf_tgt = (tf_weights['tf64'] * self.ref_gpu["tf64"] + 
                   tf_weights['tf32'] * self.ref_gpu["tf32"] + 
