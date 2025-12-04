@@ -161,6 +161,7 @@ class ScaleCalculator:
 
     def _compute_scale(self, intensity_ref: float, ratio: float) -> Tuple[float, float, float, float]:
         """Generic method to compute scaling factors for any intensity metric"""
+        # this is important, make sure dcgm metrics that are too small will not be considered
         if intensity_ref < self.INTENSITY_THRESHOLD:
             return np.inf, np.inf, np.inf, np.inf
         
@@ -259,7 +260,7 @@ class TFWeightCalculator:
         
         total = fp64a + fp32a + fp16a
         
-        # If total is 0, give equal weights
+        # If total is 0 (and TENSO > 0.01, this is guaranteed in other function), give equal weights
         if total == 0:
             return {'tf64': 1/3, 'tf32': 1/3, 'tf16': 1/3}
         
