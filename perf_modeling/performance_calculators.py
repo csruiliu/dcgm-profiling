@@ -175,7 +175,7 @@ class ScaleCalculator:
         for key in self.scale_smocc.keys():
             k_smocc_tgt = self._compute_k_smocc(self.cur_warps_tgt[key], self.tgt_gpu)
             k_smocc_ref = self._compute_k_smocc(self.cur_warps_ref, self.ref_gpu)
-            self.scale_smocc[key] = k_smocc_tgt / k_smocc_ref if k_smocc_ref != 0 else 0
+            self.scale_smocc[key] = k_smocc_tgt / k_smocc_ref if k_smocc_ref or k_smocc_tgt != 0 else np.inf
     
     def tensor_scale_weighted(self, tensor_ref: float, weights: Dict[str, float]) -> Tuple[float, float, float, float]:
         """Calculate weighted tensor core scaling factors"""        
