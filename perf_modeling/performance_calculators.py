@@ -3,7 +3,7 @@ import numpy as np
 from typing import Dict, Tuple, Optional
 
 from data_classes import MetricValues
-from gpu_specs import GPU
+from hw_specs import GPU, Host
 from data_classes import TimeComponents, TimeSlice
 
 
@@ -90,6 +90,34 @@ class TimeCalculator:
             end_idx = finish_idx
         
         return TimeSlice(start_idx=start_idx, end_idx=end_idx)
+
+
+class HostScaleCalculator:
+    """Calculates scale factors for host"""
+
+    def __init__(self, ref_host: Host, tgt_host: Host):
+        self.ref_host = ref_host
+        self.tgt_host = tgt_host
+        self._precompute_common_ratios()
+        
+    def _precompute_common_ratios(self):
+        '''
+        cpu_clock_ratio_mid_ref = np.mean([self.ref_host.get_specs("cpu_clock_base"), 
+                                           self.ref_host.get_specs("cpu_clock_boost")])
+        cpu_clock_ratio_mid_tgt = np.mean([self.tgt_host.get_specs("cpu_clock_base"), 
+                                           self.tgt_host.get_specs("cpu_clock_boost")])
+        self.cpu_clock_ratio = cpu_clock_ratio_mid_tgt / cpu_clock_ratio_mid_ref
+        '''
+        self.cpu_clock_ratio = self._get_ratio("cpu_clock_boost")
+        self.dram_ratio = self._get_ratio("mem_bw")
+        self.pcie_ratio = self._get_ratio("pcie")
+
+    def _get_ratio(self, spec: str) -> float:
+        """Helper to compute target/reference ratio for a given spec"""
+        return self.tgt_host.get_specs(spec) / self.ref_host.get_specs(spec)
+
+    def othernode_scale(self) -> float:
+        return self.cpu_clock_ratio
 
 
 class GPUScaleCalculator:

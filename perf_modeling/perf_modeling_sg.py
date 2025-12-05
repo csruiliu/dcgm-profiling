@@ -5,11 +5,17 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from gpu_specs import GPU, GPUSpec
+from hw_specs import GPU, GPUSpec, Host, HostSpec
 from data_classes import MetricValues, TimeComponents, TimeSlice
-from performance_calculators import MetricIntensityCalculator, GPUScaleCalculator, TimeCalculator, TFWeightCalculator
 from job_processor import JobProcessor 
 from utils import ResultsFormatter
+from performance_calculators import (
+    MetricIntensityCalculator,
+    GPUScaleCalculator,
+    TimeCalculator,
+    TFWeightCalculator,
+    HostScaleCalculator,
+)
 
 
 class BaseProfiler(ABC):
@@ -118,9 +124,11 @@ class TargetPredictor(BaseProfiler):
     # Class-level constants
     SMOCC_LEVELS = ['lower', 'mid', 'upper', 'mock']
 
-    def __init__(self, sample_interval_ms, ref_gpu_name, tgt_gpu_name):
+    def __init__(self, sample_interval_ms, ref_gpu_name, tgt_gpu_name, ref_host_name, tgt_host_name):
         self.ref_gpu = GPU(gpu_name=ref_gpu_name)
         self.tgt_gpu = GPU(gpu_name=tgt_gpu_name)
+        self.ref_host = Host(host_name=ref_host_name)
+        self.tgt_host = Host(host_name=tgt_host_name)
         super().__init__(sample_interval_ms, self.ref_gpu)
 
     def run(self, profiled_df: pd.DataFrame, metrics: List[str],
@@ -139,11 +147,11 @@ class TargetPredictor(BaseProfiler):
         sliced_metrics = time_slice.slice_dict(target_metrics)
         
         # Calculate estimated FLOPS and memory bandwidth
-        est_flops = self._calc_aggregated_metrics(target_metrics, 'total_flop_tgt', 'flop_smocc')
-        est_membw = self._calc_aggregated_metrics(target_metrics, 'total_dram_tgt', 'dram_smocc')
+        #est_flops = self._calc_aggregated_metrics(sliced_metrics, 'total_flop_tgt', 'flop_smocc')
+        #est_membw = self._calc_aggregated_metrics(sliced_metrics, 'total_dram_tgt', 'dram_smocc')
         
         # Print predictions
-        self.formatter.print_target_results(sliced_metrics, est_flops, est_membw, self.tgt_gpu.get_name())
+        self.formatter.print_target_results(sliced_metrics, self.tgt_gpu.get_name())
     
     def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str]) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
@@ -153,9 +161,11 @@ class TargetPredictor(BaseProfiler):
         results = {f'{metric}_{key}': [] 
                    for metric in metric_types 
                    for key in self.SMOCC_LEVELS}
+
         results['t_othernode'] = []
         
-        scale_calc = GPUScaleCalculator(self.ref_gpu, self.tgt_gpu)
+        gpu_scale_calc = GPUScaleCalculator(self.ref_gpu, self.tgt_gpu)
+        host_scale_calc = HostScaleCalculator(self.ref_host, self.tgt_host)
         tf_weight_calc = TFWeightCalculator()
         
         for row in profiled_df.itertuples(index=False):
@@ -171,18 +181,18 @@ class TargetPredictor(BaseProfiler):
             ref_components = self.time_calc.calc_components_sg(mv)
             
             # Update SMOCC and calculate all scales
-            scale_calc.update_smocc(intensities['smocc_gract'])
-            all_scales = self._calculate_all_scales(scale_calc, intensities, tf_weights)
+            gpu_scale_calc.update_smocc(intensities['smocc_gract'])
+            all_scales = self._calculate_all_scales(gpu_scale_calc, intensities, tf_weights)
             
             # Other node time (unchanged)
-            t_othernode = ref_components.t_othernode
+            t_othernode = ref_components.t_othernode / host_scale_calc.othernode_scale()
             results['t_othernode'].append(t_othernode)
 
             # Process each SMOCC key
             for i, key in enumerate(self.SMOCC_LEVELS):
                 # Calculate kernel scale (minimum of all constraints)
                 kernel_scale = min(
-                    scale_calc.scale_smocc[key],
+                    gpu_scale_calc.scale_smocc[key],
                     all_scales['dram'][i],
                     all_scales['tensor'][i],
                     all_scales['fp64'][i],
@@ -194,18 +204,7 @@ class TargetPredictor(BaseProfiler):
                 t_kernel = ref_components.t_kernel / kernel_scale if kernel_scale != 0 else 0
                 results[f't_kernel_{key}'].append(t_kernel)
                 results[f't_total_{key}'].append(t_kernel + t_othernode)
-
-                # Calculate estimate mem_bw on target GPU
-                dram_tgt = min(
-                    self.ref_gpu["mem_bw"] * intensities["drama_gract"] * scale_calc.scale_smocc[key],
-                    self.tgt_gpu["mem_bw"]
-                )
-                results[f'total_dram_tgt_{key}'].append(dram_tgt)
-
-                # Calculate FLOP target
-                flop_tgt = scale_calc.est_flop_tgt(tf_weights, intensities, scale_calc.scale_smocc[key])
-                results[f'total_flop_tgt_{key}'].append(flop_tgt)
-
+        
         return results
         
     def _calculate_all_scales(self, scale_calc: GPUScaleCalculator, intensities: Dict, tf_weights: Dict) -> Dict[str, tuple]:
@@ -241,7 +240,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-et', '--end_timestamp', type=int, default=None, help='End timestamp (ms, default: None)')
     parser.add_argument('-o', '--overall_runtime_ms', type=int, required=True, help='Overall runtime in milliseconds')
     parser.add_argument('-rg', '--ref_gpu', required=True, choices=list(GPUSpec.keys()), help='Reference GPU')
-    parser.add_argument('-tg', '--tgt_gpu', choices=list(GPUSpec.keys()), help='Target GPU(optional)')
+    parser.add_argument('-tg', '--tgt_gpu', choices=list(GPUSpec.keys()), help='Target Host (optional)')
+    parser.add_argument('-rh', '--ref_host', required=True, choices=list(HostSpec.keys()), help='Reference Host')
+    parser.add_argument('-th', '--tgt_host', choices=list(HostSpec.keys()), help='Target Host (optional)')
     parser.add_argument('--metrics', type=lambda s: s.split(','), required=True, help='Comma-separated list of metrics (e.g., GRACT,DRAMA,SMOCC)')
         
     return parser.parse_args()
@@ -263,7 +264,7 @@ def main():
     
     # Create target predictor and run if specified
     if args.tgt_gpu:
-        tgt_predictor = TargetPredictor(args.sample_interval_ms, args.ref_gpu, args.tgt_gpu)
+        tgt_predictor = TargetPredictor(args.sample_interval_ms, args.ref_gpu, args.tgt_gpu, args.ref_host, args.tgt_host)
         tgt_predictor.run(
             profiled_df, args.metrics, args.overall_runtime_ms,
             args.start_timestamp, args.end_timestamp
