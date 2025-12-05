@@ -53,6 +53,13 @@ GPUSpec = {
 }
 
 
+HostSpec = {
+    "Perlmutter": {
+        "cpu_clock_base": 2.45, "cpu_clock_boost": 3.5, "mem_bw": 204.8, "pcie": 16
+    }
+}
+
+
 @dataclass
 class GPU:
     """Encapsulates GPU specifications"""
@@ -62,6 +69,28 @@ class GPU:
     def __init__(self, gpu_name: str):
         self.name = gpu_name
         self.specs = GPUSpec.get(gpu_name)
+
+    def get_name(self) -> str:
+        return self.name
+
+    def get_specs(self, key: str, default: float = 0.0) -> float:
+        """Safe getter for spec values"""
+        return self.specs.get(key, default)
+    
+    def __getitem__(self, key: str) -> float:
+        """Allow dictionary-style access"""
+        return self.specs[key]
+    
+
+@dataclass
+class Host:
+    """Encapsulates Host specifications"""
+    name: str
+    specs: Dict[str, float]
+    
+    def __init__(self, host_name: str):
+        self.name = host_name
+        self.specs = HostSpec.get(host_name)
 
     def get_name(self) -> str:
         return self.name
