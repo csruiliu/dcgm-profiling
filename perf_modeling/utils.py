@@ -18,20 +18,20 @@ class ResultsFormatter:
         print(f"{'='*60}\n")
     
     @staticmethod
-    def print_target_results(metrics: Dict[str, List[float]], flops: Dict[str, float], mem_bw: Dict[str, float], gpu_name: str):
+    def print_target_results(metrics: Dict[str, List[float]], gpu_name: str):
         """Print target hardware results"""
         print(f"\n{'='*60}")
         print(f"Target Hardware: {gpu_name}")
         
-        print(f'Estimated TFLOPS [Lower SMOCC]: {flops.get("flop_smocc_lower"):.2f} GB/s')
-        print(f'Estimated TFLOPS [Mid SMOCC]: {flops.get("flop_smocc_mid"):.2f} GB/s')
-        print(f'Estimated TFLOPS [Upper SMOCC]: {flops.get("flop_smocc_upper"):.2f} GB/s')
-        print(f'Estimated TFLOPS [Mock SMOCC]: {flops.get("flop_smocc_mock"):.2f} GB/s')
-        
-        print(f'Estimated GPU Memory Bandwidth [Lower SMOCC]: {mem_bw.get("dram_smocc_lower"):.2f} GB/s')
-        print(f'Estimated GPU Memory Bandwidth [Mid SMOCC]: {mem_bw.get("dram_smocc_mid"):.2f} GB/s')
-        print(f'Estimated GPU Memory Bandwidth [Upper SMOCC]: {mem_bw.get("dram_smocc_upper"):.2f} GB/s')
-        print(f'Estimated GPU Memory Bandwidth [Mock SMOCC]: {mem_bw.get("dram_smocc_mock"):.2f} GB/s')
+        #print(f'Estimated TFLOPS [Lower SMOCC]: {flops.get("flop_smocc_lower"):.2f} GB/s')
+        #print(f'Estimated TFLOPS [Mid SMOCC]: {flops.get("flop_smocc_mid"):.2f} GB/s')
+        #print(f'Estimated TFLOPS [Upper SMOCC]: {flops.get("flop_smocc_upper"):.2f} GB/s')
+        #print(f'Estimated TFLOPS [Mock SMOCC]: {flops.get("flop_smocc_mock"):.2f} GB/s')
+
+        #print(f'Estimated GPU Memory Bandwidth [Lower SMOCC]: {mem_bw.get("dram_smocc_lower"):.2f} GB/s')
+        #print(f'Estimated GPU Memory Bandwidth [Mid SMOCC]: {mem_bw.get("dram_smocc_mid"):.2f} GB/s')
+        #print(f'Estimated GPU Memory Bandwidth [Upper SMOCC]: {mem_bw.get("dram_smocc_upper"):.2f} GB/s')
+        #print(f'Estimated GPU Memory Bandwidth [Mock SMOCC]: {mem_bw.get("dram_smocc_mock"):.2f} GB/s')
 
         print(f"\nEstimated Kernel Time [Lower SMOCC]: {sum(metrics['t_kernel_lower']):.2f} s")
         print(f"Estimated Kernel Time [Mid SMOCC]:   {sum(metrics['t_kernel_mid']):.2f} s")
