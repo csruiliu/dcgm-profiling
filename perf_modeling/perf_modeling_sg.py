@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from gpu_specs import GPU, GPUSpec
 from data_classes import MetricValues, TimeComponents, TimeSlice
-from performance_calculators import MetricIntensityCalculator, ScaleCalculator, TimeCalculator, TFWeightCalculator
+from performance_calculators import MetricIntensityCalculator, GPUScaleCalculator, TimeCalculator, TFWeightCalculator
 from job_processor import JobProcessor 
 from utils import ResultsFormatter
 
@@ -155,7 +155,7 @@ class TargetPredictor(BaseProfiler):
                    for key in self.SMOCC_LEVELS}
         results['t_othernode'] = []
         
-        scale_calc = ScaleCalculator(self.ref_gpu, self.tgt_gpu)
+        scale_calc = GPUScaleCalculator(self.ref_gpu, self.tgt_gpu)
         tf_weight_calc = TFWeightCalculator()
         
         for row in profiled_df.itertuples(index=False):
@@ -208,7 +208,7 @@ class TargetPredictor(BaseProfiler):
 
         return results
         
-    def _calculate_all_scales(self, scale_calc: ScaleCalculator, intensities: Dict, tf_weights: Dict) -> Dict[str, tuple]:
+    def _calculate_all_scales(self, scale_calc: GPUScaleCalculator, intensities: Dict, tf_weights: Dict) -> Dict[str, tuple]:
         """Calculate all scale factors in one place"""
         # scale_calc.smocc_scale() need to be invoked first
         return {

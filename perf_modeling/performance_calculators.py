@@ -92,7 +92,7 @@ class TimeCalculator:
         return TimeSlice(start_idx=start_idx, end_idx=end_idx)
 
 
-class ScaleCalculator:
+class GPUScaleCalculator:
     """Calculates computational intensities"""
 
     INTENSITY_THRESHOLD = 0.01
