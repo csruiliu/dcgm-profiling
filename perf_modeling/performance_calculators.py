@@ -40,13 +40,14 @@ class TimeCalculator:
         t_flop = self.sample_intv * metrics.get_flop_sum()
         t_dram = self.sample_intv * metrics.drama
         t_kernel = self.sample_intv * metrics.gract
-                
+        t_pcie = self.sample_intv * (metrics.pcitx + metrics.pcirx) / (self.gpu.get_specs("pcie_bw") * 1e9) 
         t_othernode = max(self.sample_intv * (1 - metrics.gract), 0)
         
         return TimeComponents(
             t_flop=t_flop,
             t_dram=t_dram,
             t_kernel=t_kernel,
+            t_pcie=t_pcie,
             t_nvlink=0,
             t_othernode=t_othernode
         )
@@ -56,10 +57,7 @@ class TimeCalculator:
         t_flop = self.sample_intv * metrics.get_flop_sum()
         t_dram = self.sample_intv * metrics.drama
         t_kernel = self.sample_intv * metrics.gract
-        
-        t_pcie = ((metrics.pcitx + metrics.pcirx) * self.sample_intv / 
-                  (1e9 * self.gpu.get_specs("pcie_bw")))
-        
+        t_pcie = self.sample_intv * (metrics.pcitx + metrics.pcirx) / (self.gpu.get_specs("pcie_bw") * 1e9) 
         t_nvlink = ((metrics.nvltx + metrics.nvlrx) * self.sample_intv / 
                     (1e9 * self.gpu.get_specs("nvlink_bw")))
         
@@ -69,6 +67,7 @@ class TimeCalculator:
             t_flop=t_flop,
             t_dram=t_dram,
             t_kernel=t_kernel,
+            t_pcie=t_pcie,
             t_nvlink=t_nvlink,
             t_othernode=t_othernode
         )
@@ -215,6 +214,9 @@ class GPUScaleCalculator:
 
         return self._compute_scale(tensor_ref, tf_tgt / tf_ref)
     
+    def pcie_scale(self):
+        return self.ref_gpu.get_specs("pcie_bw") / self.tgt_gpu.get_specs("pcie_bw")
+
     def dram_scale(self, dram_ref: float) -> Tuple[float, float, float]:
         """Calculate DRAM bandwidth scaling factors"""
         return self._compute_scale(dram_ref, self.bw_ratio)

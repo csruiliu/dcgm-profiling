@@ -47,6 +47,7 @@ class TimeComponents:
     t_flop: float = 0.0
     t_dram: float = 0.0
     t_kernel: float = 0.0
+    t_pcie: float = 0.0
     t_nvlink: float = 0.0
     t_othernode: float = 0.0
 
@@ -56,6 +57,7 @@ class TimeComponents:
             't_flop': self.t_flop,
             't_dram': self.t_dram,
             't_kernel': self.t_kernel,
+            't_pcie': self.t_pcie,
             't_nvlink': self.t_nvlink,
             't_othernode': self.t_othernode
         }

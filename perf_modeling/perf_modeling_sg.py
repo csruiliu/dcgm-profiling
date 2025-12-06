@@ -163,6 +163,7 @@ class TargetPredictor(BaseProfiler):
                    for key in self.SMOCC_LEVELS}
 
         results['t_othernode'] = []
+        results['t_pcie'] = []
         
         gpu_scale_calc = GPUScaleCalculator(self.ref_gpu, self.tgt_gpu)
         host_scale_calc = HostScaleCalculator(self.ref_host, self.tgt_host)
@@ -184,9 +185,13 @@ class TargetPredictor(BaseProfiler):
             gpu_scale_calc.update_smocc(intensities['smocc_gract'])
             all_scales = self._calculate_all_scales(gpu_scale_calc, intensities, tf_weights)
             
-            # Other node time (unchanged)
-            t_othernode = ref_components.t_othernode / host_scale_calc.othernode_scale()
-            results['t_othernode'].append(t_othernode)
+            # PCIe Time
+            t_pcie_tgt = ref_components.t_pcie * gpu_scale_calc.pcie_scale()
+            results['t_pcie'].append(t_pcie_tgt)
+
+            # Other node time
+            t_othernode_tgt = ref_components.t_othernode / host_scale_calc.othernode_scale()
+            results['t_othernode'].append(t_othernode_tgt)
 
             # Process each SMOCC key
             for i, key in enumerate(self.SMOCC_LEVELS):
@@ -201,9 +206,9 @@ class TargetPredictor(BaseProfiler):
                 )
 
                 # Calculate kernel and total time
-                t_kernel = ref_components.t_kernel / kernel_scale if kernel_scale != 0 else 0
-                results[f't_kernel_{key}'].append(t_kernel)
-                results[f't_total_{key}'].append(t_kernel + t_othernode)
+                t_kernel_tgt = ref_components.t_kernel / kernel_scale if kernel_scale != 0 else 0
+                results[f't_kernel_{key}'].append(t_kernel_tgt)
+                results[f't_total_{key}'].append(max(t_kernel_tgt, t_pcie_tgt) + t_othernode_tgt)
         
         return results
         
