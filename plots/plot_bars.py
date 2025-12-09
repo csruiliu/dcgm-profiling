@@ -56,15 +56,15 @@ bars5 = ax.bar(x + 2*width, mock_smocc, width, label='Mock SMOCC', color='white'
 # Add value labels on bars
 for i, (meas, su, sm, sl, mock, su_err, sm_err, sl_err, mock_err) in enumerate(zip(measured, smocc_upper, smocc_mid, smocc_lower, mock_smocc, smocc_upper_errors, smocc_mid_errors, smocc_lower_errors, mock_smocc_errors)):
     # Measured values
-    ax.text(i - 2*width, meas + 20, f'{meas}s', ha='center', va='bottom', fontsize=16)
+    ax.text(i - 2*width, meas + 20, f'{meas}s', ha='center', va='bottom', fontsize=14)
     # SMOCC Upper values
-    ax.text(i - width, su + 20, f'{su_err:+.1f}%\n{su}s', ha='center', va='bottom', fontsize=16)
+    ax.text(i - width, su + 20, f'{su_err:+.1f}%\n{su}s', ha='center', va='bottom', fontsize=14)
     # SMOCC Mid values
-    ax.text(i, sm + 20, f'{sm_err:+.1f}%\n{sm}s', ha='center', va='bottom', fontsize=16)
+    ax.text(i, sm + 20, f'{sm_err:+.1f}%\n{sm}s', ha='center', va='bottom', fontsize=14)
     # SMOCC Lower values
-    ax.text(i + width, sl + 20, f'{sl_err:+.1f}%\n{sl}s', ha='center', va='bottom', fontsize=16)
+    ax.text(i + width, sl + 20, f'{sl_err:+.1f}%\n{sl}s', ha='center', va='bottom', fontsize=14)
     # Mock SMOCC values
-    ax.text(i + 2*width, mock + 20, f'{mock_err:+.1f}%\n{mock}s', ha='center', va='bottom', fontsize=16)
+    ax.text(i + 2*width, mock + 20, f'{mock_err:+.1f}%\n{mock}s', ha='center', va='bottom', fontsize=14)
 
 # Customize plot
 ax.set_xticks(x)
