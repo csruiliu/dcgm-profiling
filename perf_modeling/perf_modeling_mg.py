@@ -5,7 +5,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from gpu_specs import GPU, GPUSpec
+from hw_specs import GPU, GPUSpec
 from data_classes import MetricValues, TimeComponents, TimeSlice
 from job_processor import JobProcessor
 from performance_calculators import MetricIntensityCalculator, ScaleCalculator, TimeCalculator
@@ -62,7 +62,7 @@ class ReferenceProfiler(BaseProfiler):
     
     def _process_single_gpu(self, df: pd.DataFrame, metrics: List[str],
                            overall_runtime_ms: float, start_ts: Optional[float],
-                           end_ts: Optional[float], tensor_prec: str) -> Dict[str, List[float]]:
+                           end_ts: Optional[float]) -> Dict[str, List[float]]:
         """Process a single GPU's data"""
         # Calculate components for all rows
         components_list = [

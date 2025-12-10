@@ -1,6 +1,6 @@
 import argparse
 
-from gpu_specs import GPU, GPUSpec
+from hw_specs import GPUSpec
 
 from workload_processor import WorkloadProcessor
 
