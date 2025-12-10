@@ -186,7 +186,7 @@ class TargetPredictor(BaseProfiler):
             all_scales = self._calculate_all_scales(gpu_scale_calc, intensities, tf_weights)
             
             # PCIe Time
-            t_pcie_tgt = ref_components.t_pcie * gpu_scale_calc.pcie_scale()
+            t_pcie_tgt = ref_components.t_pcie / gpu_scale_calc.pcie_scale()
             results['t_pcie'].append(t_pcie_tgt)
 
             # Other node time
@@ -206,9 +206,9 @@ class TargetPredictor(BaseProfiler):
                 )
 
                 # Calculate kernel and total time
-                t_kernel_tgt = ref_components.t_kernel / kernel_scale if kernel_scale != 0 else 0
+                t_kernel_tgt = ref_components.t_kernel / kernel_scale
                 results[f't_kernel_{key}'].append(t_kernel_tgt)
-                results[f't_total_{key}'].append(max(t_kernel_tgt, t_pcie_tgt) + t_othernode_tgt)
+                results[f't_total_{key}'].append(t_kernel_tgt + t_pcie_tgt + t_othernode_tgt)
         
         return results
         

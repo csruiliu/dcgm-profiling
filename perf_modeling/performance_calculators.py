@@ -58,8 +58,7 @@ class TimeCalculator:
         t_dram = self.sample_intv * metrics.drama
         t_kernel = self.sample_intv * metrics.gract
         t_pcie = self.sample_intv * (metrics.pcitx + metrics.pcirx) / (self.gpu.get_specs("pcie_bw") * 1e9) 
-        t_nvlink = ((metrics.nvltx + metrics.nvlrx) * self.sample_intv / 
-                    (1e9 * self.gpu.get_specs("nvlink_bw")))
+        t_nvlink = self.sample_intv * (metrics.nvltx + metrics.nvlrx) / (self.gpu.get_specs("nvlink_bw") * 1e9)
         
         t_othernode = max(self.sample_intv * (1 - metrics.gract) - t_nvlink, 0)
         
@@ -100,16 +99,16 @@ class HostScaleCalculator:
         self._precompute_common_ratios()
         
     def _precompute_common_ratios(self):
-        '''
         cpu_clock_ratio_mid_ref = np.mean([self.ref_host.get_specs("cpu_clock_base"), 
                                            self.ref_host.get_specs("cpu_clock_boost")])
         cpu_clock_ratio_mid_tgt = np.mean([self.tgt_host.get_specs("cpu_clock_base"), 
                                            self.tgt_host.get_specs("cpu_clock_boost")])
         self.cpu_clock_ratio = cpu_clock_ratio_mid_tgt / cpu_clock_ratio_mid_ref
-        '''
-        self.cpu_clock_ratio = self._get_ratio("cpu_clock_boost")
+        
+        #self.cpu_clock_ratio = self._get_ratio("cpu_clock_boost")
         self.dram_ratio = self._get_ratio("mem_bw")
         self.pcie_ratio = self._get_ratio("pcie")
+        self.cpu_cores_ratio = self._get_ratio("cpu_cores")
 
     def _get_ratio(self, spec: str) -> float:
         """Helper to compute target/reference ratio for a given spec"""
@@ -203,7 +202,10 @@ class GPUScaleCalculator:
         for key in self.scale_smocc.keys():
             k_smocc_tgt = self._compute_k_smocc(self.cur_warps_tgt[key], self.tgt_gpu)
             k_smocc_ref = self._compute_k_smocc(self.cur_warps_ref, self.ref_gpu)
-            self.scale_smocc[key] = k_smocc_tgt / k_smocc_ref if k_smocc_ref or k_smocc_tgt != 0 else np.inf
+            if k_smocc_ref == 0 or k_smocc_tgt == 0:
+                self.scale_smocc[key] = np.inf
+            else:
+                self.scale_smocc[key] = k_smocc_tgt / k_smocc_ref
     
     def tensor_scale_weighted(self, tensor_ref: float, weights: Dict[str, float]) -> Tuple[float, float, float, float]:
         """Calculate weighted tensor core scaling factors"""        
@@ -215,14 +217,14 @@ class GPUScaleCalculator:
         return self._compute_scale(tensor_ref, tf_tgt / tf_ref)
     
     def pcie_scale(self):
-        return self.ref_gpu.get_specs("pcie_bw") / self.tgt_gpu.get_specs("pcie_bw")
+        return self._get_ratio("pcie_bw")
 
     def dram_scale(self, dram_ref: float) -> Tuple[float, float, float]:
         """Calculate DRAM bandwidth scaling factors"""
         return self._compute_scale(dram_ref, self.bw_ratio)
-    '''
-    def dram_scale(self, intensities: Dict) -> Tuple[float, float, float, float]:
-        """Calculate DRAM bandwidth scaling factors"""
+    
+    def dram_l2_scale(self, intensities: Dict) -> Tuple[float, float, float, float]:
+        """Calculate DRAM bandwidth with L2 cache scaling factors (tentative)"""
         if intensities['drama_gract'] < self.INTENSITY_THRESHOLD:
             return np.inf, np.inf, np.inf, np.inf
         
@@ -234,7 +236,6 @@ class GPUScaleCalculator:
             return min(self.scale_smocc[key], scale_factor) * l_factor
             
         return tuple(calculate_lambda_factor(key) for key in ['lower', 'mid', 'upper', 'mock'])
-    '''
         
     def fp64_scale(self, fp64_ref: float) -> Tuple[float, float, float, float]:
         """Calculate FP64 scaling factors"""
@@ -258,16 +259,13 @@ class GPUScaleCalculator:
         fps = ['fp64', 'fp32', 'fp16']
         fp_refs = [intensities['fp64a_gract'], intensities['fp32a_gract'], intensities['fp16a_gract']]
 
-        # Tensor target
         tensor_tgt = tf_tgt * intensities['tenso_gract'] * smocc_scale
         
-        # Precision targets
         fp_tgts = [
             min(self.ref_gpu[prec] * ref * smocc_scale, self.tgt_gpu[prec])
             for prec, ref in zip(fps, fp_refs)
         ]
         
-        # Sum all components
         flop_tgt = tensor_tgt + sum(fp_tgts)
 
         return flop_tgt
