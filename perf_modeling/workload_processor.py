@@ -4,7 +4,7 @@ import json
 import ast
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Set, List, Any
-from gpu_specs import GPU
+from hw_specs import GPU
 import traceback
 
 from concurrent.futures import ProcessPoolExecutor
