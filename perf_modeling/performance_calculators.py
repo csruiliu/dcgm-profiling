@@ -114,8 +114,11 @@ class HostScaleCalculator:
         """Helper to compute target/reference ratio for a given spec"""
         return self.tgt_host.get_specs(spec) / self.ref_host.get_specs(spec)
 
-    def othernode_scale(self) -> float:
-        return self.cpu_clock_ratio
+    def othernode_scale(self, cores_alloc: str) -> float:
+        if cores_alloc == "same":
+            return self.cpu_clock_ratio
+        else:
+            return self.cpu_clock_ratio * self.cpu_cores_ratio
 
 
 class GPUScaleCalculator:
@@ -210,9 +213,9 @@ class GPUScaleCalculator:
     def tensor_scale_weighted(self, tensor_ref: float, weights: Dict[str, float]) -> Tuple[float, float, float, float]:
         """Calculate weighted tensor core scaling factors"""        
         tf_tgt = sum(weights[prec] * self.tgt_gpu.get_specs(prec) 
-                         for prec in ['tf64', 'tf32', 'tf16'])
+                     for prec in ['tf64', 'tf32', 'tf16'])
         tf_ref = sum(weights[prec] * self.ref_gpu.get_specs(prec) 
-                         for prec in ['tf64', 'tf32', 'tf16'])
+                     for prec in ['tf64', 'tf32', 'tf16'])
 
         return self._compute_scale(tensor_ref, tf_tgt / tf_ref)
     

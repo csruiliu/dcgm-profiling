@@ -133,10 +133,10 @@ class TargetPredictor(BaseProfiler):
 
     def run(self, profiled_df: pd.DataFrame, metrics: List[str],
             overall_runtime_ms: float, start_ts: Optional[float], 
-            end_ts: Optional[float]):
+            end_ts: Optional[float], cores_alloc: str):
         """Predict performance on target hardware"""        
         # Calculate target metrics
-        target_metrics = self._calc_target_metrics(profiled_df, metrics)
+        target_metrics = self._calc_target_metrics(profiled_df, metrics, cores_alloc)
         
         # Get time slice
         time_slice = self.time_calc.get_time_slice(
@@ -153,7 +153,7 @@ class TargetPredictor(BaseProfiler):
         # Print predictions
         self.formatter.print_target_results(sliced_metrics, self.tgt_gpu.get_name())
     
-    def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str]) -> Dict[str, List[float]]:
+    def _calc_target_metrics(self, profiled_df: pd.DataFrame, metrics: List[str], cores_alloc: str) -> Dict[str, List[float]]:
         """Calculate metrics for target hardware"""
 
         metric_types = ['t_kernel', 't_total', 'total_dram_tgt', 'total_flop_tgt']
@@ -190,7 +190,7 @@ class TargetPredictor(BaseProfiler):
             results['t_pcie'].append(t_pcie_tgt)
 
             # Other node time
-            t_othernode_tgt = ref_components.t_othernode / host_scale_calc.othernode_scale()
+            t_othernode_tgt = ref_components.t_othernode / host_scale_calc.othernode_scale(cores_alloc)
             results['t_othernode'].append(t_othernode_tgt)
 
             # Process each SMOCC key
@@ -223,11 +223,10 @@ class TargetPredictor(BaseProfiler):
             'fp16': scale_calc.fp16_scale(intensities['fp16a_gract'])
         }
 
-    def _calc_aggregated_metrics(self, results: Dict[str, List], 
-                                 source_prefix: str, target_prefix: str) -> Dict[str, float]:
+    def _calc_aggregated_metrics(self, results: Dict[str, List], src_prefix: str, tgt_prefix: str) -> Dict[str, float]:
         """Generic method to calculate aggregated metrics (FLOPS or memory bandwidth)"""
         return {
-            f"{target_prefix}_{key}": np.mean(results[f'{source_prefix}_{key}'])
+            f"{tgt_prefix}_{key}": np.mean(results[f'{src_prefix}_{key}'])
             for key in self.SMOCC_LEVELS
         }
 
@@ -248,7 +247,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-tg', '--tgt_gpu', choices=list(GPUSpec.keys()), help='Target Host (optional)')
     parser.add_argument('-rh', '--ref_host', required=True, choices=list(HostSpec.keys()), help='Reference Host')
     parser.add_argument('-th', '--tgt_host', choices=list(HostSpec.keys()), help='Target Host (optional)')
-    parser.add_argument('--metrics', type=lambda s: s.split(','), required=True, help='Comma-separated list of metrics (e.g., GRACT,DRAMA,SMOCC)')
+    parser.add_argument('-ca', '--cores_alloc', type=str, required=True, choices=['same', 'all'], help='CPU Cores Allocation Strategy (optional)')
+    parser.add_argument('--metrics', type=lambda s: s.split(','), required=True, help='Comma-separated list of metrics (e.g., GRACT, DRAMA, SMOCC)')
         
     return parser.parse_args()
 
@@ -272,7 +272,7 @@ def main():
         tgt_predictor = TargetPredictor(args.sample_interval_ms, args.ref_gpu, args.tgt_gpu, args.ref_host, args.tgt_host)
         tgt_predictor.run(
             profiled_df, args.metrics, args.overall_runtime_ms,
-            args.start_timestamp, args.end_timestamp
+            args.start_timestamp, args.end_timestamp, args.cores_alloc
         )
 
 
