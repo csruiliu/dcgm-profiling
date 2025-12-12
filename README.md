@@ -1,26 +1,38 @@
-# Profiling GPU Performance using DCGM Metrics 
+# Performance Modeling and Prediction for GPU-Workloads Using DCGM
 
-`berkeleyGW`: BerkeleyGW Performance Profiling
+We use collected Nvidia DCGM data for performance modeling and prediction. We evaluate the model via various benchmarking applications including GEMM, BableStream, BerkeleyGW, LAMMPS, MILC, etc.
 
-`gemm`: GEMM Performance Profiling 
+## Containerized DCGM deployment on Perlmutter
 
-`gpu_util`: GPU Utilization Performance Profiling
+The deploy containerized DCGM on Perlmutter, we need to add following option in sbatch scripts.
 
-`dcgm_analyze.py`: Analyze the raw results from DCGM metrics and plot some figures
+```
+#SBATCH --perf=generic
+```
 
-`perf_modeling.py`: Modeling and predicting performance of various applications on difference GPUs.
+Also, we need to use `podman-hpc` to start containerized dcgm. Usually, we should add it in the sbatch script or interactive script as well.
 
+```
+podman-hpc run -d -it --name dcgm-container --rm \
+    --gpu --cap-add SYS_ADMIN -p 5555:5555 \
+    nvcr.io/nvidia/cloud-native/dcgm:4.2.3-1-ubuntu22.04
+```
 
-## DCGM Profiling on Perlmutter
-
-## DCGM Profiling on Lawrencium/Einsteinium
+## Containerized DCGM deployment on Lawrencium/Einsteinium
 
 DCGM is not currently installed on Lawrencium/Einsteinium systems. To deploy DCGM on these clusters, we'll use a container-based approach with Singularity, which is the default container tool. Use the following commands for deployment:
 
 1. Start dcgm-instance using 4.4.1-2-ubuntu22.04 (the latest version at the time of writing), and `--fakeroot` is the key option.
 
 ```
-singularity instance start --fakeroot --nv --writable-tmpfs --bind /tmp:/tmp --network=none docker://nvidia/dcgm:4.4.1-2-ubuntu22.04 dcgm-instance
+singularity instance start \
+  --fakeroot \
+  --nv \
+  --writable-tmpfs \
+  --bind /tmp:/tmp \
+  --network=none \
+  docker://nvidia/dcgm:4.4.1-2-ubuntu22.04 \
+  dcgm-instance
 ```
 
 2. Start DCGM engine in background
@@ -32,5 +44,7 @@ singularity exec instance://dcgm-instance nv-hostengine -n &
 3. Using container-based `dcgmi dmon`, which usually defined in `wrap-dcgmi.sh`.
 
 ```
-singularity exec instance://dcgm-instance dcgmi dmon -d $dcgm_delay -i 0 -e $dcgm_metrics > $RESULTS_DIR/$dcgm_outfile &
+singularity exec instance://dcgm-instance \
+    dcgmi dmon -d $dcgm_delay -i 0 -e $dcgm_metrics \
+    > $RESULTS_DIR/$dcgm_outfile &
 ```
