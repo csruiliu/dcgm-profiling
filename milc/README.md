@@ -1,52 +1,111 @@
 # MILC
 
-## Build MILC on LRC-H100 using the commit in the N10 benchmark
+## Build MILC on LRC-H100 using the commit of the N10 benchmark
 
-### 1. Compile and install QUDA 
+### 1. run build-quda.sh
 
-```
-# Create necessary folders
-mkdir ~/dcgm-profiling/milc
-cd ~/dcgm-profiling/milc
-mkdir quda_install
+```bash
+#! /usr/bin/bash
 
-# Checkout out specific commit 
-git clone --branch develop https://github.com/lattice/quda.git
-cd quda
-git checkout 35b57df9f
+BASE_DIRECTORY=$(pwd)
+SOURCE_DIRECTORY=${BASE_DIRECTORY}/quda
+BUILD_DIRECTORY=${BASE_DIRECTORY}/build
+INSTALL_DIRECTORY=${BASE_DIRECTORY}/install
 
-# Create build folder 
-mkdir build
+pushd .
 
-# Compile and install QUDA 
-cd build
-cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_CXX_COMPILER=$(which nvc++) -DCMAKE_C_COMPILER=$(which nvcc) -DCMAKE_CUDA_COMPILER=$(which nvcc) -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" -DCMAKE_SKIP_RPATH=TRUE -DQUDA_GPU_ARCH=sm_90 -DQUDA_DIRAC_DEFAULT_OFF=ON -DQUDA_DIRAC_STAGGERED=ON -DQUDA_FORCE_HISQ=ON -DQUDA_FORCE_GAUGE=ON -DCMAKE_INSTALL_PREFIX="/global/home/users/rliu5/dcgm-profiling/milc/quda_install" ..
-cmake --build . -j
-cmake --build . -- install
-```
+cd $BASE_DIRECTORY
+if [ ! -d ${SOURCE_DIRECTORY} ]
+then
+  git clone --branch develop https://github.com/lattice/quda ${SOURCE_DIRECTORY}
+fi
 
-### 2. Compile and install MILC_QCD 
+cd ${SOURCE_DIRECTORY}
+git checkout c75b77c731eb9ad16c93b4fc312e80225a84f1ea
 
-```
-# Checkout specific commit
-cd ~/dcgm-profiling/milc
-git clone --branch develop https://github.com/milc-qcd/milc_qcd.git
-cd milc_qcd
-git checkout 13ffa851
-```
+mkdir -p ${BUILD_DIRECTORY}
+mkdir -p ${INSTALL_DIRECTORY}
 
-The following two modified souce files in the N10 benchmark should be copied into the MILC source code.
+cd ${BUILD_DIRECTORY}
 
-```
-https://gitlab.com/NERSC/N10-benchmarks/lattice-qcd-workflow/-/blob/main/build/ks_imp_rhmc_control.c?ref_type=heads
-https://gitlab.com/NERSC/N10-benchmarks/lattice-qcd-workflow/-/blob/main/build/ks_imp_rhmc_update_rhmc.c?ref_type=heads
-```
+cmake ${BASE_DIRECTORY}/quda/ \
+  -DCMAKE_BUILD_TYPE=RELEASE \
+  -DCMAKE_INSTALL_PREFIX=${INSTALL_DIRECTORY} \
+  # change this due to GPUs
+  -DQUDA_GPU_ARCH=sm_90 \
+  -DQUDA_DIRAC_DEFAULT_OFF=ON \
+  -DQUDA_DIRAC_STAGGERED=ON \
+  -DQUDA_QMP=ON \
+  -DQUDA_QIO=ON \
+  -DQUDA_DOWNLOAD_USQCD=ON && \
+cmake --build ${BUILD_DIRECTORY} --target all -- -j && \
+cmake --build ${BUILD_DIRECTORY} --target install -- -j
 
-```
-cp ks_imp_rhmc_control.c milc/milc_qcd/ks_imp_rhmc/control.c
-cp ks_imp_rhmc_update_rhmc.c milc/milc_qcd/ks_imp_rhmc/update_rhmc.c
+popd
 ```
 
-### 3. Modfiy the Makefile
+2. run build-milc.sh
+
+```bash
+#! /usr/bin/bash
+
+BASE_DIRECTORY=$(pwd)
+QUDA_DIRECTORY=${BASE_DIRECTORY}/install
+MILC_DIRECTORY=${BASE_DIRECTORY}/milc_qcd
+
+# Hack to find the CUDA directory
+CUDA_DIRECTORY=$(which nvcc)
+CUDA_DIRECTORY=${CUDA_DIRECTORY/\bin\/nvcc/}
+
+pushd .
+
+cd $BASE_DIRECTORY
+if [ ! -d ${MILC_DIRECTORY} ]
+then
+  git clone --branch develop https://github.com/milc-qcd/milc_qcd ${MILC_DIRECTORY}
+fi
+
+cd ${MILC_DIRECTORY}
+git checkout f803f4bf
+
+cd ${MILC_DIRECTORY}/ks_imp_rhmc
+
+if [ ! -f "./Makefile" ]
+then
+  cp ../Makefile .
+fi
+
+if [ -f "./su3_rhmd_hisq" ]
+then
+  rm ./su3_rhmd_hisq
+fi
+
+COMPILER="gnu" \
+CTIME="-DCGTIME -DFFTIME -DGATIME -DGFTIME -DREMAP -DPRTIME -DIOTIME" \
+CGEOM="-DFIX_NODE_GEOM -DFIX_IONODE_GEOM" \
+MY_CC=mpicc \
+MY_CXX=mpicxx \
+CUDA_HOME=${CUDA_DIRECTORY} \
+QUDA_HOME=${QUDA_DIRECTORY} \
+WANTQUDA=true \
+WANT_FN_CG_GPU=true \
+WANT_FL_GPU=true \
+WANT_GF_GPU=true \
+WANT_FF_GPU=true \
+WANT_GA_GPU=true \
+WANT_MIXED_PRECISION_GPU=0 \
+# 1 for single, 2 for double
+PRECISION=1 \
+MPP=true \
+OMP=true \
+WANTQIO=true \
+WANTQMP=true \
+QIOPAR=${QUDA_DIRECTORY} \
+QMPPAR=${QUDA_DIRECTORY} \
+make -j 1 su3_rhmd_hisq
+
+popd
+```
+
 
 
