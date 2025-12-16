@@ -2,9 +2,11 @@
 #SBATCH -N 1
 #SBATCH -C gpu&hbm40g
 #SBATCH -G 1
+#SBATCH --cpus-per-task=2
 #SBATCH -q sow
 #SBATCH -t 00:30:00
 #SBATCH -A nstaff
+#SBATCH --exclusive
 #SBATCH --perf=generic
 #SBATCH -o ../results/GPU_UTIL_%j/GPU_UTIL_%j.out
 
@@ -12,7 +14,7 @@ podman-hpc run -d -it --name dcgm-container --rm --gpu --cap-add SYS_ADMIN -p 55
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1
-export OMP_PLACES=threads
+export OMP_PLACES=cores
 export OMP_PROC_BIND=spread
 
 # create results directory if not exist

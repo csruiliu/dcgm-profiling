@@ -1,16 +1,19 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -C gpu
+#SBATCH -C gpu&hbm40g
 #SBATCH -G 4
-#SBATCH -q debug
+#SBATCH -q sow
 #SBATCH -t 00:30:00
 #SBATCH -A nstaff
 #SBATCH --exclusive
+#SBATCH --perf=generic
 #SBATCH -o ../results/GPU_UTIL_%j/GPU_UTIL_%j.out
+
+podman-hpc run -d -it --name dcgm-container --rm --gpu --cap-add SYS_ADMIN -p 5555:5555 nvcr.io/nvidia/cloud-native/dcgm:4.2.3-1-ubuntu22.04
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1
-export OMP_PLACES=threads
+export OMP_PLACES=cores
 export OMP_PROC_BIND=spread
 
 # create results directory if not exist
