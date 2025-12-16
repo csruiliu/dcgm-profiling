@@ -1,9 +1,3 @@
-# arch.mk for BerkeleyGW codes
-#
-# Do:
-# module swap PrgEnv-gnu PrgEnv-nvidia ; module load cray-hdf5-parallel ; module load cray-fftw ; module load cray-libsci ; module load python
-#
-#
 COMPFLAG  = -DNVHPC -DNVHPC_API -DNVIDIA_GPU
 PARAFLAG  = -DMPI  -DOMP
 MATHFLAG  = -DUSESCALAPACK -DUNPACKED -DUSEFFTW3 -DHDF5 -DOPENACC -DOMP_TARGET # -DUSEPRIMME -DUSEELPA # -DOMP_TARGET
