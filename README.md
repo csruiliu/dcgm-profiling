@@ -22,9 +22,9 @@ podman-hpc run -d -it --name dcgm-container --rm \
 
 DCGM is not currently installed on Lawrencium/Einsteinium systems. To deploy DCGM on these clusters, we'll use a container-based approach with Singularity, which is the default container tool. Use the following commands for deployment:
 
-1. Start dcgm-instance using 4.4.1-2-ubuntu22.04 (the latest version at the time of writing), and `--fakeroot` is the key option.
+Start dcgm-instance using 4.4.1-2-ubuntu22.04 (the latest version at the time of writing), and `--fakeroot` is the key option.
 
-```
+```bash
 singularity instance start \
   --fakeroot \
   --nv \
@@ -35,15 +35,15 @@ singularity instance start \
   dcgm-instance
 ```
 
-2. Start DCGM engine in background
+Starting DCGM engine in background
 
-```
+```bash
 singularity exec instance://dcgm-instance nv-hostengine -n &
 ```
 
-3. Using container-based `dcgmi dmon`, which usually defined in `wrap-dcgmi.sh`.
+Using container-based `dcgmi dmon`, which usually defined in `wrap-dcgmi.sh`.
 
-```
+```bash
 singularity exec instance://dcgm-instance \
     dcgmi dmon -d $dcgm_delay -i 0 -e $dcgm_metrics \
     > $RESULTS_DIR/$dcgm_outfile &
