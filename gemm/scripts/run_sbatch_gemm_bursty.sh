@@ -2,11 +2,14 @@
 #SBATCH -N 1
 #SBATCH -C gpu&hbm40g
 #SBATCH -G 1
-#SBATCH -q debug
+#SBATCH -q sow
 #SBATCH -t 00:05:00
 #SBATCH -A nstaff
+#SBATCH --perf=generic
 #SBATCH -o ../results/GEMM_BURSTY_%j/GEMM_BURSTY_%j.out
 #SBATCH --exclusive
+
+podman-hpc run -d -it --name dcgm-container --rm --gpu --cap-add SYS_ADMIN -p 5555:5555 nvcr.io/nvidia/cloud-native/dcgm:4.2.3-1-ubuntu22.04
 
 #OpenMP settings:
 export OMP_NUM_THREADS=1

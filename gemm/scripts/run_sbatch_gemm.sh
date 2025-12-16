@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --qos=debug
+#SBATCH --qos=sow
 #SBATCH -C gpu&hbm40g
 #SBATCH -G 1
 #SBATCH --nodes=1
