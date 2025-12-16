@@ -34,7 +34,7 @@ dcgm_metrics=""
 
 dcgm_metrics+="1001," #gr_engine_active
 #dcgm_metrics+="1002," #sm_active
-#dcgm_metrics+="1003," #sm_occupancy
+dcgm_metrics+="1003," #sm_occupancy
 dcgm_metrics+="1004," #tensor_active
 dcgm_metrics+="1005," #dram_active
 dcgm_metrics+="1006," #fp64_active
@@ -56,8 +56,12 @@ dcgm_metrics="${dcgm_metrics%?}"
 dcgm_outfile=dcgm.d$dcgm_delay.$SLURM_JOB_ID.$SLURM_STEP_ID-$SLURM_NODEID.out
 
 if [[ $SLURM_LOCALID -eq 0 ]]; then
-    #dcgmi dmon -d $dcgm_delay -e $dcgm_metrics > $SLURM_NODEID.dcgm &
-    podman-hpc exec -it dcgm-container dcgmi dmon -i 0 -d $dcgm_delay -e $dcgm_metrics > $RESULTS_DIR/$dcgm_outfile &
+    # For Perlmutter
+    podman-hpc exec -it dcgm-container dcgmi dmon -d $dcgm_delay -i 0 -e $dcgm_metrics > $RESULTS_DIR/$dcgm_outfile &
+    
+    # For Lawrencium, make sure the GPU index before using
+    singularity exec instance://dcgm-instance dcgmi dmon -d $dcgm_delay -i 6 -e $dcgm_metrics > ${RESULTS_DIR}/$dcgm_outfile &
+
     dcgmi_pid=$!
 fi
 
@@ -68,4 +72,3 @@ if [[ $SLURM_LOCALID -eq 0 ]]; then
     wait $! 2>/dev/null
 fi
 
-#$(dirname $0)/glob_dcgmi.sh
