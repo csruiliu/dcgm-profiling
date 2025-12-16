@@ -14,16 +14,18 @@ cp ../small_spec.txt .
 # This is needed if LAMMPS is built using cmake.
 #install_dir="../../../install_PM"
 #export LD_LIBRARY_PATH=${install_dir}/lib64:$LD_LIBRARY_PATH
-EXE="/global/homes/r/ruiliu/dcgm-profiling/lammps/bin-ptlin/lmp_fp32_n9"
+EXE="/global/scratch/users/rliu5/lammps-lrc-h100-fp64/install_lammps/bin/lmp"
 
 # Match the build env.
 export MPICH_GPU_SUPPORT_ENABLED=1
 
-gpus_per_node=4
+export OMP_NUM_THREADS=16
+export OMP_PLACES=cores
+export OMP_PROC_BIND=spread
 
 input="-k on g $gpus_per_node -sf kk -pk kokkos newton on neigh half ${BENCH_SPEC} "
 
-command="srun -n $gpus_per_node $EXE $input"
+command="srun -n 1 -c 32 --cpu-bind=cores $EXE $input"
 
 echo $command
 
