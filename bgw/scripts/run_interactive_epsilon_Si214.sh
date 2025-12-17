@@ -25,7 +25,7 @@ export BGW_WFN_HDF5_INDEPENDENT=1
 
 DCGM_PATH=/global/scratch/users/rliu5/bgw-lrc-h100-fp64/scripts/wrap_dcgmi_container.sh
 
-srun -n 1 -c 32 --cpu-bind=cores $DCGM_PATH ./epsilon.cplx.x > ${RESULTS_DIR}/bgw-${SLURM_JOB_ID}.out
+srun -n 1 -c 16 $DCGM_PATH ./epsilon.cplx.x > ${RESULTS_DIR}/bgw-${SLURM_JOB_ID}.out
 
 rm -f eps0mat.h5
 unlink epsilon.cplx.x

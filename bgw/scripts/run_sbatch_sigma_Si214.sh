@@ -5,6 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=32
+#SBATCH --cpu-bind=cores
 #SBATCH -A nstaff
 #SBATCH -J bgw_sig_Si214
 #SBATCH -C gpu&hbm40g
