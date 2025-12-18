@@ -1,33 +1,71 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import argparse
+from pathlib import Path
 
-# Read all CSV files
-data_files = {
-    'BGW-FP64-A100': 'bgw-fp64-a100-ref.csv',
-    'BGW-FP64-H100': 'bgw-fp64-h100-ref.csv',
-    'LAMMPS-FP32-A100': 'lammps-fp32-a100-ref.csv',
-    'LAMMPS-FP32-H100': 'lammps-fp32-h100-ref.csv',
-    'MILC-FP32-A100': 'milc-fp32-a100-ref.csv',
-    'MILC-FP32-H100': 'milc-fp32-h100-ref.csv',
-    'MILC-FP64-A100': 'milc-fp64-a100-ref.csv',
-    'MILC-FP64-H100': 'milc-fp64-h100-ref.csv'
-}
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Generate violin plot of relative errors from CSV files')
+parser.add_argument('input_path', type=str, 
+                    help='Path to a CSV data file or folder containing CSV files')
+parser.add_argument('--format', type=str, default='png', 
+                    choices=['png', 'pdf', 'svg', 'jpg'],
+                    help='Output image format (default: png)')
+parser.add_argument('--output-name', type=str, default='relative_error_violin_plot',
+                    help='Output filename (default: relative_error_violin_plot)')
+args = parser.parse_args()
+
+# Check if input is a file or directory
+input_path = Path(args.input_path)
+
+csv_files = []
+if input_path.is_file():
+    # Process single file
+    if input_path.suffix.lower() == '.csv':
+        csv_files = [input_path]
+    else:
+        print(f"Error: {input_path} is not a CSV file")
+        exit(1)
+elif input_path.is_dir():
+    # Process all CSV files in directory
+    csv_files = sorted(list(input_path.glob('*.csv')))
+    
+    if not csv_files:
+        print(f"No CSV files found in directory: {input_path}")
+        exit(1)
+else:
+    print(f"Error: {input_path} is neither a file nor a directory")
+    exit(1)
+
+print(f"Found {len(csv_files)} CSV file(s)")
 
 # Collect relative errors for each SMOCC variant
 smocc_variants = ['smocc_lower', 'smocc_mid', 'smocc_upper', 'mock_smocc']
 relative_errors = {variant: [] for variant in smocc_variants}
 
-for name, file in data_files.items():
-    df = pd.read_csv(file)
-    
-    for _, row in df.iterrows():
-        measured = row['measured']
+# Process each CSV file
+for csv_file in csv_files:
+    print(f"Processing: {csv_file.name}")
+    try:
+        df = pd.read_csv(csv_file, comment='#')
         
-        # Calculate relative error for each variant: (predicted - measured) / measured * 100
-        for variant in smocc_variants:
-            rel_error = (row[variant] - measured) / measured * 100
-            relative_errors[variant].append(rel_error)
+        for _, row in df.iterrows():
+            measured = row['measured']
+            
+            # Calculate relative error for each variant: (predicted - measured) / measured * 100
+            for variant in smocc_variants:
+                if variant in row:
+                    rel_error = (row[variant] - measured) / measured * 100
+                    relative_errors[variant].append(rel_error)
+                else:
+                    print(f"Warning: Column '{variant}' not found in {csv_file.name}")
+    except Exception as e:
+        print(f"Error processing {csv_file.name}: {e}")
+
+# Check if we have any data
+if all(len(errors) == 0 for errors in relative_errors.values()):
+    print("Error: No valid data found in the CSV files")
+    exit(1)
 
 # Prepare data for violin plot
 data = [relative_errors[variant] for variant in smocc_variants]
@@ -76,9 +114,12 @@ ax.legend(handles=legend_elements, loc='upper right', fontsize=12)
 # Add statistics text
 stats_text = []
 for i, variant in enumerate(smocc_variants):
-    mean_err = np.mean(relative_errors[variant])
-    median_err = np.median(relative_errors[variant])
-    stats_text.append(f'{labels[i]}: Mean={mean_err:.1f}%, Median={median_err:.1f}%')
+    if len(relative_errors[variant]) > 0:
+        mean_err = np.mean(relative_errors[variant])
+        median_err = np.median(relative_errors[variant])
+        stats_text.append(f'{labels[i]}: Mean={mean_err:.1f}%, Median={median_err:.1f}%')
+    else:
+        stats_text.append(f'{labels[i]}: No data')
 
 # Add text box with statistics
 textstr = '\n'.join(stats_text)
@@ -87,4 +128,8 @@ ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
         verticalalignment='top', bbox=props)
 
 plt.tight_layout()
-plt.savefig('relative_error_violin_plot.png', dpi=300, bbox_inches='tight')
+
+# Generate output filename
+output_file = f"{args.output_name}.{args.format}"
+plt.savefig(output_file, dpi=300, bbox_inches='tight')
+print(f"\nViolin plot saved to: {output_file}")
